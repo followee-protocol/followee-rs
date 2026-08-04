@@ -18,8 +18,8 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned commit: `a66228cb7907fd131df52636a4b7212f0e642307`
-- specification draft: `v0.3`
+- pinned commit: `814768597e593edba6713df02014dfaaeeb62532`
+- specification draft: `v0.4`
 - protocol version: `1`
 - DID method: `did:flw`
 
@@ -383,7 +383,10 @@ The resolver must:
 - query multiple configured relays;
 - locally verify every Full candidate;
 - discard invalid candidates without treating them as valid `Absent` results;
-- preserve the distinction between Absent and a per-DID Error such as `premature`;
+- treat Absent and per-DID Error results as supplying neither a candidate nor a reference target;
+- charge Absent and Error responses to the same shared operation budgets as other responses and continue while an unqueried relay selected for the operation remains reachable within those budgets;
+- treat Error(`premature`) solely as the reporting relay's clock-dependent diagnostic and never transfer that classification to a Full candidate from that or another relay;
+- leave cached identity and sticky authority state unchanged by Absent and Error results;
 - traverse references through matching directory generations;
 - perform cycle detection using the specified tuple;
 - retain and apply sticky RootRevoked state;
@@ -415,7 +418,7 @@ The implementation MUST reproduce Appendix B byte-for-byte, including:
 
 Every mutation in Appendix B.7 must be represented as an executable negative test. The test should assert the intended symbolic error where the verification algorithm defines one, not merely assert generic failure.
 
-The B.8 candidate must verify cryptographically under the attacker key but fail with `descriptorMismatch` before it can be admitted or displayed.
+The B.8 candidate must verify cryptographically under the attacker key but fail with `identityBindingMismatch` before it can be admitted or displayed.
 
 #### Appendix B.7 fault isolation
 
@@ -427,7 +430,7 @@ Use the following construction plan:
 
 | Appendix B.7 item | Required treatment |
 | ---: | --- |
-| 1 | Implement all three v0.3 identity-binding cases: (a) an unchanged internally consistent envelope verified against a different syntactically valid target DID; (b) a body `id` changed to another valid DID, re-signed with the applicable legitimate key and verified against the original target; and (c) that same re-signed mutation verified against the mutated target. Every case has exact error `descriptorMismatch`. Case (a) may be classified as `multiple` because both body-to-target and descriptor-to-target comparisons fail, but the exact assertion remains portable because Section 8.1 normatively assigns the same error to both checks. Cases (b) and (c) isolate the two relations separately. |
+| 1 | Implement all three v0.4 identity-binding cases: (a) an unchanged internally consistent envelope verified against a different syntactically valid target DID; (b) a body `id` changed to another valid DID, re-signed with the applicable legitimate key and verified against the original target; and (c) that same re-signed mutation verified against the mutated target. Every case has exact error `identityBindingMismatch`. Case (a) may be classified as `multiple` because both body-to-target and descriptor-to-target comparisons fail, but the exact assertion remains portable because Section 8.1 normatively assigns the same error to both checks. Cases (b) and (c) isolate the two relations separately. |
 | 2 | Use target-only cases without mutating the signed envelope. A structurally well-formed multihash using a code other than `0x12`, with declared length matching bytes present, has exact error `unsupportedHash`. Code `0x12` with a structurally well-formed digest length other than `0x20`, again matching the bytes present, also has exact error `unsupportedHash`. Add separate malformed cases for a missing or non-minimal varint, declared/actual length disagreement and trailing bytes, each with exact error `invalidDid`. The specification explicitly assigns these errors despite any additional body-to-target inequality created by changing the target. |
 | 3 | Encode protected `alg = -8`, then re-sign the resulting `Sig_structure` with the legitimate applicable key so the unsupported suite is the only fault. |
 | 4–6 | Mutate only the missing tag, non-empty unprotected map or detached-payload representation. Preserve the otherwise valid signed material and signature. |
@@ -563,6 +566,8 @@ The eventual integration suite must demonstrate:
 - cursor reset, including the exact two-field `ResetRequired` response followed by bounded null-cursor enumeration;
 - all `changes` status-dependent required and forbidden field combinations, including rejection of every label `2` through `6` on status `1`;
 - a stored Full record becoming premature after an injected backwards clock correction, producing Error(`premature`) without a state or update-number change;
+- one relay returning Absent and another Error(`premature`) before a further selected relay returns a valid Full candidate, with resolution continuing and the candidate classified only by the client's injected clock;
+- Absent and Error results leaving cached identity and sticky authority state unchanged;
 - sticky revocation surviving Full-to-Ref conversion;
 - withheld and stale records;
 - handle discovery and inverse verification; and
@@ -617,7 +622,7 @@ For example:
   "expected": {
     "accepted": false,
     "errorAssertion": "exact",
-    "error": "descriptorMismatch"
+    "error": "identityBindingMismatch"
   }
 }
 ```
@@ -667,7 +672,7 @@ Deliver:
 - formatting, linting and test CI;
 - `#![forbid(unsafe_code)]` at the crate root;
 - `cargo-audit` and `cargo-deny` configuration;
-- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; the entries for Appendix B.7 items 1 and 2 and the status-`1` reset field policy must cite their resolution in specification v0.3 at the pinned commit rather than remain open;
+- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; entries through the code-`7` symbolic rename and non-authoritative Absent/Error client rules must cite their resolution in specification v0.4 at the pinned commit rather than remain open;
 - injected clock and randomness traits; and
 - documented developer commands.
 
@@ -703,8 +708,8 @@ Acceptance:
 - the B.5 RootRevoked wiring test delegates exactly once with label `5`'s exact revealed revocation public key, COSE `Sig_structure` and received signature;
 - the public B.4 `S + L` test uses the non-injectable production record-verification wrapper;
 - CI rejects direct underlying-library verification calls outside the audited strict wrapper;
-- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications fixed by specification v0.3 at the pinned commit;
-- B.8 fails specifically at descriptor binding despite a valid attacker signature;
+- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications fixed by specification v0.4 at the pinned commit;
+- B.8 fails specifically with `identityBindingMismatch` despite a valid attacker signature;
 - future-bound, stale-record, absolute RootRevoked-precedence, no-fallback and sticky-state-loss tests described in Section 11.1 pass;
 - no untrusted parser panic under the initial fuzz corpus;
 - all implemented MUST/MUST NOT requirements are mapped to tests; and
@@ -791,6 +796,9 @@ Acceptance:
 - relays can begin with different partial views;
 - one relay can synchronize a newer record without historical events;
 - a client follows references but verifies the final Full locally;
+- a client continues past Absent and Error results while another relay selected for the operation remains unqueried within the shared budgets;
+- Error(`premature`) from one relay cannot classify or suppress a Full candidate obtained from that or another relay, and the candidate is checked using the client's injected clock;
+- Absent and Error results cannot alter cached identity or sticky RootRevoked state;
 - cycles and unavailable peers terminate within shared budgets; and
 - synchronized invalid or losing input does not alter current state.
 
