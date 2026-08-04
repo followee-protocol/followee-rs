@@ -18,7 +18,8 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned commit: `7e81d32f53f40ff8daf6cef77bceec4b6308c0b9`
+- pinned commit: `a66228cb7907fd131df52636a4b7212f0e642307`
+- specification draft: `v0.3`
 - protocol version: `1`
 - DID method: `did:flw`
 
@@ -355,7 +356,7 @@ Pagination tests must prove that:
 - an entry too large for the requested byte limit returns `responseTooLarge` rather than looping; and
 - reset causes bounded re-enumeration without deleting independently verified local identity state.
 
-For `v1/changes`, status `1` alone encodes `ResetRequired` and carries no `errorCode`. Status `2` requires an error code. Tests must reject every status/field combination forbidden by Section 12.6 rather than accepting it merely because the Appendix A CDDL marks the union fields optional.
+For `v1/changes`, status `1` alone encodes `ResetRequired`. Its deterministic-CBOR response contains exactly labels `0: 1` and `1: 1`; entries, `nextCursor`, `hasMore`, `directoryGeneration` and `errorCode` are all forbidden. Status `2` requires an error code. Tests must reject every status/field combination forbidden by Section 12.6 rather than accepting it merely because the Appendix A CDDL marks the union fields optional.
 
 ### 9.4 Synchronization
 
@@ -426,8 +427,8 @@ Use the following construction plan:
 
 | Appendix B.7 item | Required treatment |
 | ---: | --- |
-| 1 | Record a `SPEC-QUESTIONS.md` entry before implementation. The normative specification must distinguish an unchanged envelope verified against a different target DID from a body-`id` mutation followed by re-signing, and assign any exact expected errors. They are different tests. |
-| 2 | Split unsupported multihash code and invalid digest length into separate target-DID cases. Do not also mutate the signed body. The specification must settle their exact error expectations before the fixtures are promoted to `specification`. |
+| 1 | Implement all three v0.3 identity-binding cases: (a) an unchanged internally consistent envelope verified against a different syntactically valid target DID; (b) a body `id` changed to another valid DID, re-signed with the applicable legitimate key and verified against the original target; and (c) that same re-signed mutation verified against the mutated target. Every case has exact error `descriptorMismatch`. Case (a) may be classified as `multiple` because both body-to-target and descriptor-to-target comparisons fail, but the exact assertion remains portable because Section 8.1 normatively assigns the same error to both checks. Cases (b) and (c) isolate the two relations separately. |
+| 2 | Use target-only cases without mutating the signed envelope. A structurally well-formed multihash using a code other than `0x12`, with declared length matching bytes present, has exact error `unsupportedHash`. Code `0x12` with a structurally well-formed digest length other than `0x20`, again matching the bytes present, also has exact error `unsupportedHash`. Add separate malformed cases for a missing or non-minimal varint, declared/actual length disagreement and trailing bytes, each with exact error `invalidDid`. The specification explicitly assigns these errors despite any additional body-to-target inequality created by changing the target. |
 | 3 | Encode protected `alg = -8`, then re-sign the resulting `Sig_structure` with the legitimate applicable key so the unsupported suite is the only fault. |
 | 4–6 | Mutate only the missing tag, non-empty unprotected map or detached-payload representation. Preserve the otherwise valid signed material and signature. |
 | 7–10 | Make the intended deterministic-CBOR or schema mutation and re-sign the exact mutated payload with the legitimate applicable key. |
@@ -559,8 +560,8 @@ The eventual integration suite must demonstrate:
 - differing relay views converging when information is exchanged;
 - references, directory generations and lazy path compression;
 - reference cycles and unreachable endpoints;
-- cursor reset;
-- all `changes` status-dependent required and forbidden field combinations;
+- cursor reset, including the exact two-field `ResetRequired` response followed by bounded null-cursor enumeration;
+- all `changes` status-dependent required and forbidden field combinations, including rejection of every label `2` through `6` on status `1`;
 - a stored Full record becoming premature after an injected backwards clock correction, producing Error(`premature`) without a state or update-number change;
 - sticky revocation surviving Full-to-Ref conversion;
 - withheld and stale records;
@@ -666,7 +667,7 @@ Deliver:
 - formatting, linting and test CI;
 - `#![forbid(unsafe_code)]` at the crate root;
 - `cargo-audit` and `cargo-deny` configuration;
-- `SPEC-QUESTIONS.md`, initially recording both unresolved Appendix B.7 questions: item 1's construction and error semantics, and item 2's `invalidDid` versus `unsupportedHash` result for an unsupported code or invalid digest length;
+- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; the entries for Appendix B.7 items 1 and 2 and the status-`1` reset field policy must cite their resolution in specification v0.3 at the pinned commit rather than remain open;
 - injected clock and randomness traits; and
 - documented developer commands.
 
@@ -702,7 +703,7 @@ Acceptance:
 - the B.5 RootRevoked wiring test delegates exactly once with label `5`'s exact revealed revocation public key, COSE `Sig_structure` and received signature;
 - the public B.4 `S + L` test uses the non-injectable production record-verification wrapper;
 - CI rejects direct underlying-library verification calls outside the audited strict wrapper;
-- the Appendix B.7 clarification is committed in the protocol repository and Section 2 is re-pinned before these cases are accepted as `specification` fixtures;
+- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications fixed by specification v0.3 at the pinned commit;
 - B.8 fails specifically at descriptor binding despite a valid attacker signature;
 - future-bound, stale-record, absolute RootRevoked-precedence, no-fallback and sticky-state-loss tests described in Section 11.1 pass;
 - no untrusted parser panic under the initial fuzz corpus;
@@ -770,7 +771,7 @@ Acceptance:
 - the relay passes Sections 20.1 and 20.2 tests applicable without peers;
 - update numbers change exactly when specified;
 - resolve distinguishes Absent from a retained but presently premature record;
-- `changes` uses status `1` as the sole ResetRequired signal and enforces every status-dependent field rule;
+- `changes` uses the exact two-field status-`1` response as the sole ResetRequired signal, forbids labels `2` through `6` in that response, and enforces every other status-dependent field rule;
 - restart preserves identity, generation and sticky authority state; and
 - malformed and oversized input is bounded before expensive processing.
 
