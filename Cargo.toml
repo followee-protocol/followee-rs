@@ -1,0 +1,27 @@
+[package]
+name = "followee"
+# 0.1.0 is reserved for the v0.1 completion definition in IMPLEMENTATION.md section 15.
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+description = "Non-normative Rust implementation of the Followee DID method and relay protocol"
+license = "MIT"
+repository = "https://github.com/followee-protocol/followee-rs"
+publish = false
+
+[dependencies]
+getrandom = "0.4"
+thiserror = "2"
+
+[lints.rust]
+# The crate root also carries #![forbid(unsafe_code)] as required by
+# IMPLEMENTATION.md section 6.2; this table entry is defence in depth.
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+# IMPLEMENTATION.md section 7.3: arithmetic around timestamps, skew bounds and
+# counters must be checked and must not wrap. Denying this lint crate-wide makes
+# every unchecked arithmetic operator a compile failure under CI's -D warnings;
+# intentional wrapping or saturating behaviour must be spelled out explicitly.
+arithmetic_side_effects = "deny"

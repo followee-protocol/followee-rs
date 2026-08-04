@@ -1,0 +1,6 @@
+# Pinned toolchain so local development, CI and reviewers compile, format and
+# lint with identical tool versions. Bump deliberately in its own change, then
+# rerun the complete CI suite (IMPLEMENTATION.md section 11.7).
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
