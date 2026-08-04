@@ -10,9 +10,7 @@ No relay network is required for the first useful deployment. A domain can map a
 
 ## Status
 
-**Pre-implementation.** The protocol specification and Rust implementation brief are complete enough to begin Milestone 0. No usable library, CLI, relay, resolver, or production identity system exists in this repository yet.
-
-The first implementation session is deliberately limited to scaffolding: package structure, lockfile, CI, safety policy, injected clock and randomness traits, and the initial specification questions. Cryptography and CBOR begin only after that scaffold has been reviewed.
+**Milestone 0 (scaffold) delivered, under review.** The repository contains the package structure, committed lockfile, CI, safety policy, injected clock and randomness traits, and the specification questions in [`SPEC-QUESTIONS.md`](SPEC-QUESTIONS.md). No protocol behaviour — no DID handling, CBOR, COSE, cryptography, verification, relay, or resolver code — is implemented yet, and none is claimed. Cryptography and CBOR begin only after this scaffold has been reviewed and the open Milestone 1 specification questions (SQ-1, SQ-2) are resolved in the protocol repository.
 
 Do not use `did:flw` for production identities. The DID method is not registered, the implementation has not passed conformance or interoperability testing, and the public keys in the protocol test vectors are deliberately backed by published private seeds.
 
@@ -68,17 +66,21 @@ Milestones are gates, not labels. Relay work does not begin until both the Rust 
 
 ## Development
 
-Development commands will be added during Milestone 0 and must work from a clean clone. The expected CI floor is:
+The toolchain is pinned by [`rust-toolchain.toml`](rust-toolchain.toml); with [rustup](https://rustup.rs) installed, every `cargo` invocation resolves it automatically. All commands work from a clean clone. The CI floor, run on every push and pull request, is:
 
 ```text
 cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo test --locked --doc --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 cargo audit
 cargo deny check
 ```
 
-The crate will use `#![forbid(unsafe_code)]`. Security-sensitive protocol branches require direct tests, requirement traceability, fuzzing, and mutation-testing review; line coverage alone is not treated as evidence of correctness.
+`cargo-audit` and `cargo-deny` are installed separately (`cargo install cargo-audit cargo-deny` or prebuilt release binaries); their policies live in [`deny.toml`](deny.toml).
+
+The crate root carries `#![forbid(unsafe_code)]`, and `clippy::arithmetic_side_effects` is denied crate-wide so unchecked arithmetic fails the lint gate. Security-sensitive protocol branches require direct tests, requirement traceability, fuzzing, and mutation-testing review; line coverage alone is not treated as evidence of correctness.
 
 ## Contributing
 
