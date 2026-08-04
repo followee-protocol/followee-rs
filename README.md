@@ -10,7 +10,9 @@ No relay network is required for the first useful deployment. A domain can map a
 
 ## Status
 
-**Milestone 0 (scaffold) delivered, under review.** The repository contains the package structure, committed lockfile, CI, safety policy, injected clock and randomness traits, and the specification questions in [`SPEC-QUESTIONS.md`](SPEC-QUESTIONS.md). No protocol behaviour — no DID handling, CBOR, COSE, cryptography, verification, relay, or resolver code — is implemented yet, and none is claimed. Cryptography and CBOR begin only after this scaffold has been reviewed and the open Milestone 1 specification questions (SQ-1, SQ-2) are resolved in the protocol repository.
+**Milestone 0 (scaffold) complete; Milestone 1 unblocked.** The repository contains the package structure, committed lockfile, CI, safety policy, injected clock and randomness traits, and the specification questions in [`SPEC-QUESTIONS.md`](SPEC-QUESTIONS.md) — all of which are resolved as of specification v0.3 at the pinned commit. No protocol behaviour — no DID handling, CBOR, COSE, cryptography, verification, relay, or resolver code — is implemented yet, and none is claimed. Milestone 1 (protocol core and complete Appendix B conformance tests) is the next unit of work.
+
+[`tools/spec_vector_check.py`](tools/spec_vector_check.py) independently re-derives every Appendix B test-vector value from the specification text (27/27 reproduce byte-for-byte against v0.3). It is a spec-review aid, not the Milestone 1.5 clean-room model, and is excluded from that model's authoring context.
 
 Do not use `did:flw` for production identities. The DID method is not registered, the implementation has not passed conformance or interoperability testing, and the public keys in the protocol test vectors are deliberately backed by published private seeds.
 
@@ -34,7 +36,7 @@ It will not define the protocol. If this code or its tests disagree with the nor
 - [Followee whitepaper](https://github.com/followee-protocol/followee/blob/main/Followee-Whitepaper.md) — motivation, design rationale, and security model
 - [Rust implementation brief](IMPLEMENTATION.md) — repository scope, architecture, test strategy, and milestone gates
 
-The Rust brief currently targets protocol repository commit `7e81d32f53f40ff8daf6cef77bceec4b6308c0b9`. When a normative ambiguity is resolved, the brief must be re-pinned and the complete conformance suite rerun.
+The Rust brief currently targets protocol repository commit `a66228cb7907fd131df52636a4b7212f0e642307` (specification v0.3). When a normative ambiguity is resolved, the brief must be re-pinned and the complete conformance suite rerun.
 
 ## Design commitments
 
