@@ -124,6 +124,19 @@ mod tests {
     }
 
     #[test]
+    fn deterministic_random_matches_splitmix64_reference() {
+        // Known-answer test: splitmix64(seed = 0) first output is
+        // 0xE220A8397B1DCDAF (reference implementation, Vigna). This pins the
+        // exact mixing constants so fixture streams stay reproducible across
+        // releases.
+        let mut out = [0u8; 8];
+        DeterministicRandom::from_seed(0)
+            .fill(&mut out)
+            .expect("fill");
+        assert_eq!(out, 0xE220_A839_7B1D_CDAFu64.to_le_bytes());
+    }
+
+    #[test]
     fn deterministic_random_handles_partial_trailing_chunk() {
         // Length not divisible by 8 exercises the tail path; prefix of a
         // longer fill from the same seed must match a shorter fill exactly.

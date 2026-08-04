@@ -1,0 +1,14 @@
+# IMPLEMENTATION.md section 6.2 mechanical enforcement: Ed25519 verification is
+# reachable only through the audited crypto::verify_followee_ed25519. Every
+# underlying library verification entry point is banned crate-wide. The strict
+# wrapper itself is built from curve25519-dalek point/scalar arithmetic and does
+# not call any of these, so no scoped allowance exists anywhere in the crate.
+# tests/lint_guard.rs asserts this file keeps these entries.
+disallowed-methods = [
+    { path = "ed25519_dalek::VerifyingKey::verify_strict", reason = "use crate::crypto::verify_followee_ed25519; library strict verification does not enforce every Followee section 3.3 rule" },
+    { path = "ed25519_dalek::Verifier::verify", reason = "use crate::crypto::verify_followee_ed25519; the permissive library verifier accepts encodings Followee must reject" },
+    { path = "ed25519_dalek::hazmat::raw_verify", reason = "use crate::crypto::verify_followee_ed25519" },
+    # verify_prehashed, verify_prehashed_strict and raw_verify_byupdate are
+    # not reachable under this crate's dalek feature set (no "digest"
+    # feature); re-add them here if those features are ever enabled.
+]

@@ -10,8 +10,19 @@ repository = "https://github.com/followee-protocol/followee-rs"
 publish = false
 
 [dependencies]
+bs58 = "0.5"
+curve25519-dalek = { version = "4", default-features = false, features = ["alloc", "precomputed-tables", "zeroize"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize", "fast"] }
 getrandom = "0.4"
+iri-string = "0.7"
+sha2 = "0.10"
 thiserror = "2"
+
+[dev-dependencies]
+curve25519-dalek = { version = "4", default-features = false, features = ["alloc"] }
+hex = "0.4"
+proptest = "1"
+serde_json = "1"
 
 [lints.rust]
 # The crate root also carries #![forbid(unsafe_code)] as required by
@@ -25,3 +36,7 @@ missing_docs = "warn"
 # every unchecked arithmetic operator a compile failure under CI's -D warnings;
 # intentional wrapping or saturating behaviour must be spelled out explicitly.
 arithmetic_side_effects = "deny"
+# IMPLEMENTATION.md section 6.2: the record path must reach Ed25519 only through
+# crypto::verify_followee_ed25519. The banned entry points are listed in
+# clippy.toml; tests/lint_guard.rs fails if that configuration is removed.
+disallowed_methods = "deny"

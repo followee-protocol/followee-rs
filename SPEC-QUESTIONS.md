@@ -3,16 +3,15 @@
 Ambiguities identified in the normative specification
 (`followee-protocol/followee`), tracked against the pinned commit in
 IMPLEMENTATION.md section 2 (currently
-`a66228cb7907fd131df52636a4b7212f0e642307`, specification v0.3). Per
+`41f82fa272b96468363f2106f7923ad168f5bf82`, specification v0.5). Per
 IMPLEMENTATION.md section 2, questions are resolved in the protocol repository
 — never silently in this implementation — and no milestone may pass while an
 open question affects code delivered by that milestone. Resolving a question
 that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
-**All recorded questions are currently resolved.** Each resolved entry cites
-the resolving specification version and records the test obligation the
-resolution creates.
+**All recorded questions are resolved.** Each resolved entry cites the resolving specification version and
+records the test obligation the resolution creates.
 
 ---
 
@@ -33,8 +32,10 @@ assigns the same error, `descriptorMismatch`, to failure of either relation
 - (c) the same re-signed mutation verified against the mutated target
   (isolates descriptor-to-target).
 
-All three produce exact error `descriptorMismatch`, independent of the
-section 8.1 permitted reordering of cheap checks.
+All three produce the same exact binding error, independent of the section
+8.1 permitted reordering of cheap checks. The symbol was renamed
+`identityBindingMismatch` (wire code 7 unchanged) by the v0.4 amendment; see
+SQ-8.
 
 **Test obligation (Milestone 1):**
 `sec_8_1_binding_case_a_foreign_target`, `sec_8_1_binding_case_b_mutated_id_original_target`,
@@ -121,3 +122,30 @@ and `1`; entries, `nextCursor`, `hasMore`, `directoryGeneration`, and
 `errorCode` MUST all be absent.
 
 **Test obligation (Milestone 3):** `sec_12_6_reset_response_is_exactly_labels_0_and_1`.
+
+## SQ-8 — Pending v0.4 amendment: `identityBindingMismatch` rename and resolution-continuation rules
+
+**Status:** resolved (spec v0.4/v0.5, commit `41f82fa`) · **Affected:** Milestone 1 (rename), Milestone 4 (continuation) · **Spec:** sections 8.1, 14.1, 15.3, 20.3
+
+Resolved by amendment. The v0.4 amendment renamed the section 15.3 error symbol
+`descriptorMismatch` to `identityBindingMismatch`, retaining numeric wire
+code `7`. It also clarified that client resolution continues past relay `Absent`
+and per-DID `Error` results while budgets and unqueried relays remain, with
+`Error(premature)` being relay-local diagnostic information that must not
+affect candidates obtained elsewhere.
+
+Specification v0.5 additionally states that Absent and per-DID Error results
+are non-conclusive and budget-consuming, that resolution continues while
+selected unqueried relays and shared budgets remain, and that
+`Error(premature)` is relay-local diagnostic information which must not affect
+candidates obtained elsewhere or local sticky state (section 14.1; conformance
+items in section 20.3).
+
+This implementation used the renamed symbol from the start
+(`VerifyError::IdentityBindingMismatch`, wire code 7), so the re-pin required
+no code change; Appendix B bytes are unchanged and the complete suite was
+rerun against the new pin.
+
+**Test obligation (Milestone 4):**
+`sec_14_1_resolution_continues_past_absent_and_error`,
+`sec_14_1_error_premature_is_relay_local_diagnostic`.

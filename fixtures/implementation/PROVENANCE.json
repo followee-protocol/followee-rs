@@ -1,0 +1,381 @@
+{
+  "_provenance": {
+    "description": "Construction provenance for the executable Appendix B.7 negative conformance cases in tests/negative_b7.rs and tests/conformance.rs",
+    "derivation_status": "implementation",
+    "spec_version": "v0.5",
+    "pinned_commit": "41f82fa272b96468363f2106f7923ad168f5bf82",
+    "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14; the identityBindingMismatch symbol is normative as of specification v0.4). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations."
+  },
+  "cases": [
+    {
+      "id": "b7-1a-foreign-target",
+      "baseVector": "B.4",
+      "mutation": "none; unchanged envelope verified against the B.8.1 attacker DID as target",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "multiple",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "identityBindingMismatch"
+      },
+      "note": "both binding relations fail, but section 8.1 assigns the same error to both checks, so the exact assertion is portable"
+    },
+    {
+      "id": "b7-1b-mutated-id-original-target",
+      "baseVector": "B.4",
+      "mutation": "body label 1 replaced with the equal-length attacker DID; verified against the original target",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "identityBindingMismatch"
+      },
+      "note": "isolates body-to-target"
+    },
+    {
+      "id": "b7-1c-mutated-id-mutated-target",
+      "baseVector": "B.4",
+      "mutation": "same payload as b7-1b; verified against the mutated (attacker) target",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "identityBindingMismatch"
+      },
+      "note": "isolates descriptor-to-target"
+    },
+    {
+      "id": "b7-2a-foreign-code",
+      "baseVector": "B.3 DID",
+      "mutation": "target-only: multihash code 0x16 with matching 32-byte digest",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "unsupportedHash"
+      }
+    },
+    {
+      "id": "b7-2b-foreign-length",
+      "baseVector": "B.3 DID",
+      "mutation": "target-only: code 0x12, declared length 0x1f, 31 digest bytes",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "unsupportedHash"
+      }
+    },
+    {
+      "id": "b7-2c-non-minimal-varint",
+      "baseVector": "B.3 DID",
+      "mutation": "target-only: code varint encoded 0x92 0x00",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "invalidDid"
+      }
+    },
+    {
+      "id": "b7-2d-length-disagreement",
+      "baseVector": "B.3 DID",
+      "mutation": "target-only: declared 0x20 but 31 digest bytes",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "invalidDid"
+      }
+    },
+    {
+      "id": "b7-2e-trailing-bytes",
+      "baseVector": "B.3 DID",
+      "mutation": "target-only: one trailing byte after the digest",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "invalidDid"
+      }
+    },
+    {
+      "id": "b7-3-alg-minus-8",
+      "baseVector": "B.4",
+      "mutation": "protected header {1:-8}; Sig_structure re-signed over mutated protected bytes",
+      "protectedBytesChanged": true,
+      "payloadBytesChanged": false,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "unsupportedSuite"
+      },
+      "note": "error assigned by this implementation; the specification does not fix an exact error for item 3"
+    },
+    {
+      "id": "b7-4a-missing-tag",
+      "baseVector": "B.4",
+      "mutation": "leading d2 tag byte removed; signed material untouched",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-4b-non-minimal-tag",
+      "baseVector": "B.4",
+      "mutation": "tag 18 re-encoded d8 12; signed material untouched",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-5-unprotected-headers",
+      "baseVector": "B.4",
+      "mutation": "unprotected map a0 replaced with {1:-19}; outside Sig_structure, no re-sign needed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-6-detached-payload",
+      "baseVector": "B.4",
+      "mutation": "payload bstr replaced with null, signature preserved",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-7-non-minimal-int",
+      "baseVector": "B.4",
+      "mutation": "protocolVersion 1 encoded 18 01; re-signed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "nonDeterministicCbor"
+      }
+    },
+    {
+      "id": "b7-8-reordered-keys",
+      "baseVector": "B.4",
+      "mutation": "labels 0 and 1 swapped; re-signed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "nonDeterministicCbor"
+      }
+    },
+    {
+      "id": "b7-9-duplicate-key",
+      "baseVector": "B.4",
+      "mutation": "second label-0 entry inserted; re-signed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "nonDeterministicCbor"
+      }
+    },
+    {
+      "id": "b7-10-root-with-label-5",
+      "baseVector": "B.4",
+      "mutation": "label 5 (revocation public key) inserted into Root body; re-signed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-11-revoked-missing-label-5",
+      "baseVector": "B.5",
+      "mutation": "label 5 removed; re-signed with the revocation key so the missing field is the only fault",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 revocation seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-12-wrong-revealed-key",
+      "baseVector": "B.5",
+      "mutation": "label 5 replaced with the B.8.1 attacker revocation public key; commitment unchanged; signed with the attacker revocation seed so the signature verifies and the commitment mismatch is the single fault",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.8.1 attacker revocation seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "invalidRevocationKey"
+      }
+    },
+    {
+      "id": "b7-13-flipped-signature-bit",
+      "baseVector": "B.4",
+      "mutation": "last signature byte XOR 0x01; not re-signed (signature failure is the condition under test)",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "invalidSignature"
+      }
+    },
+    {
+      "id": "b7-14-s-plus-l",
+      "baseVector": "B.4",
+      "mutation": "scalar S replaced with S + L, independently recomputed little-endian; R, payload, protected bytes unchanged",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "invalidSignature"
+      }
+    },
+    {
+      "id": "b7-15-valid-until-before-timestamp",
+      "baseVector": "B.4",
+      "mutation": "label 6 = timestamp - 1 inserted; re-signed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-16a-envelope-over-16kib",
+      "baseVector": "B.4",
+      "mutation": "16 KiB extension bstr at record level; contact stays small so the envelope cap is the single operative limit; re-signed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "recordTooLarge"
+      }
+    },
+    {
+      "id": "b7-16b-contact-over-12kib",
+      "baseVector": "B.4",
+      "mutation": "contact extension bstr pushes contact past 12 KiB while envelope stays under 16 KiB; re-signed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-16c-field-and-aggregate-boundaries",
+      "baseVector": "B.4",
+      "mutation": "per-field over-limit variants (display name, summary, URI, alsoKnownAs count, service count, service id, extension key, depth, member count), each re-signed",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      }
+    }
+  ]
+}

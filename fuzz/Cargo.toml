@@ -1,0 +1,38 @@
+[package]
+name = "followee-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+followee = { path = ".." }
+
+# Detached from the parent so ordinary builds and CI jobs do not require the
+# nightly fuzzing toolchain.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "did_parse"
+path = "fuzz_targets/did_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cbor_validate"
+path = "fuzz_targets/cbor_validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "verify_record"
+path = "fuzz_targets/verify_record.rs"
+test = false
+doc = false
+bench = false

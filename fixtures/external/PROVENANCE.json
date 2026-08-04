@@ -1,0 +1,18 @@
+{
+  "source": "https://github.com/novifinancial/ed25519-speccheck",
+  "file": "cases.json @ branch main",
+  "url": "https://raw.githubusercontent.com/novifinancial/ed25519-speccheck/main/cases.json",
+  "retrieved": "2026-08-04",
+  "sha256": "08e47a36d9aead288664930505584f353fff113ab854f2800db1e4f5b3540450",
+  "licence": "Apache-2.0 OR MIT (per upstream repository)",
+  "origin": "Chalkias, Garillot, Nikolaenko: 'Taming the many EdDSAs' (SSR 2020) cross-implementation edge-case vectors",
+  "fixture_kind": "primitive Ed25519 conformance vectors, NOT complete Followee envelopes",
+  "expected_followee_strict_result": "reject for every case; each violates at least one specification section 3.3 rule (small/mixed-order points -> rules 5/6, non-canonical encodings -> rule 3, S >= L -> rule 4), verified per-case by independent property computation in tests/primitive_ed25519.rs",
+  "rules_exercised": [
+    "3.3 rule 3",
+    "3.3 rule 4",
+    "3.3 rule 5",
+    "3.3 rule 6",
+    "3.3 rule 7"
+  ]
+}

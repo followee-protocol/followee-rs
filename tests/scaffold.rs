@@ -16,6 +16,13 @@ fn clock_trait_objects_are_usable() {
 }
 
 #[test]
+fn fuzzing_entry_point_matches_validator_behaviour() {
+    assert!(followee::fuzzing::validate_cbor(&[0x00]));
+    assert!(!followee::fuzzing::validate_cbor(&[0xff]));
+    assert!(!followee::fuzzing::validate_cbor(&[]));
+}
+
+#[test]
 fn random_trait_objects_are_usable() {
     let deterministic = DeterministicRandom::from_seed(0);
     let sources: [&dyn RandomSource; 2] = [&OsRandom, &deterministic];

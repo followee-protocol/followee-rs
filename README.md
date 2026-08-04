@@ -10,9 +10,9 @@ No relay network is required for the first useful deployment. A domain can map a
 
 ## Status
 
-**Milestone 0 (scaffold) complete; Milestone 1 unblocked.** The repository contains the package structure, committed lockfile, CI, safety policy, injected clock and randomness traits, and the specification questions in [`SPEC-QUESTIONS.md`](SPEC-QUESTIONS.md) — all of which are resolved as of specification v0.3 at the pinned commit. No protocol behaviour — no DID handling, CBOR, COSE, cryptography, verification, relay, or resolver code — is implemented yet, and none is claimed. Milestone 1 (protocol core and complete Appendix B conformance tests) is the next unit of work.
+**Milestone 1 (protocol core) delivered, under review.** The crate implements the complete Followee v1 protocol core against specification v0.5: strict deterministic CBOR, the exact COSE Sign1 profile, `did:flw` parsing and derivation, Authority Descriptors and revocation commitments, Contact Document and record schemas, signing, the sole strict-Ed25519 verification entry point with a mechanical direct-call restriction, full-record verification, deterministic ordering, and sticky root revocation. The complete Appendix B conformance suite reproduces every published byte sequence exactly and rejects every required mutation with fault-isolated fixtures; all recorded specification questions in [`SPEC-QUESTIONS.md`](SPEC-QUESTIONS.md) are resolved. No relay, resolver, HTTP, storage, or CLI code exists yet; Milestone 1.5 (the independently authored Python model) is the next gate before relay work.
 
-[`tools/spec_vector_check.py`](tools/spec_vector_check.py) independently re-derives every Appendix B test-vector value from the specification text (27/27 reproduce byte-for-byte against v0.3). It is a spec-review aid, not the Milestone 1.5 clean-room model, and is excluded from that model's authoring context.
+[`tools/spec_vector_check.py`](tools/spec_vector_check.py) independently re-derives every Appendix B test-vector value from the specification text (27/27 reproduce byte-for-byte against v0.5). It is a spec-review aid, not the Milestone 1.5 clean-room model, and is excluded from that model's authoring context.
 
 Do not use `did:flw` for production identities. The DID method is not registered, the implementation has not passed conformance or interoperability testing, and the public keys in the protocol test vectors are deliberately backed by published private seeds.
 
@@ -36,7 +36,7 @@ It will not define the protocol. If this code or its tests disagree with the nor
 - [Followee whitepaper](https://github.com/followee-protocol/followee/blob/main/Followee-Whitepaper.md) — motivation, design rationale, and security model
 - [Rust implementation brief](IMPLEMENTATION.md) — repository scope, architecture, test strategy, and milestone gates
 
-The Rust brief currently targets protocol repository commit `a66228cb7907fd131df52636a4b7212f0e642307` (specification v0.3). When a normative ambiguity is resolved, the brief must be re-pinned and the complete conformance suite rerun.
+The Rust brief currently targets protocol repository commit `41f82fa272b96468363f2106f7923ad168f5bf82` (specification v0.5). When a normative ambiguity is resolved, the brief must be re-pinned and the complete conformance suite rerun.
 
 ## Design commitments
 
@@ -88,7 +88,7 @@ The crate root carries `#![forbid(unsafe_code)]`, and `clippy::arithmetic_side_e
 
 Read the complete pinned specification and [implementation brief](IMPLEMENTATION.md) before changing protocol-facing code. Do not silently resolve protocol ambiguities in this repository: record them in `SPEC-QUESTIONS.md` and resolve them in `followee-protocol/followee` before implementation depends on an interpretation.
 
-The first coding contribution should implement **Milestone 0 only**. Please stop at its acceptance criteria and present the scaffold and CI for review before beginning cryptography or CBOR.
+Work proceeds one milestone at a time; each milestone stops at its acceptance criteria for review before the next begins. The Milestone 1.5 Python model must be authored in a clean session without access to this repository's Rust source or provisional fixtures (IMPLEMENTATION.md sections 11.4 and 14).
 
 ## Security
 

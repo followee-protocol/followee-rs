@@ -18,7 +18,7 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned commit: `814768597e593edba6713df02014dfaaeeb62532`
+- pinned commit: `41f82fa272b96468363f2106f7923ad168f5bf82`
 - specification draft: `v0.4`
 - protocol version: `1`
 - DID method: `did:flw`
