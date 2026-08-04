@@ -18,7 +18,7 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned commit: `663c948`
+- pinned commit: `7e81d32f53f40ff8daf6cef77bceec4b6308c0b9`
 - protocol version: `1`
 - DID method: `did:flw`
 
@@ -319,6 +319,8 @@ POST v1/changes
 
 It must use the exact media types, schemas, result alignment, status values, error codes, bounds and CORS behaviour in the specification.
 
+Before returning a stored Full result, the relay repeats the future-bound check against its current injected clock. A stored record that has become premature is not returned as Full or conflated with Absent: the relay returns a usable Ref or the per-DID `premature` Error result. This serving-time decision must not mutate the stored entry, change `lastUpdated`, or increment the relay-local update number.
+
 ### 9.2 Storage
 
 Use SQLite transactions to make current-state replacement, sticky authority-state changes and relay-local update-number assignment atomic.
@@ -353,6 +355,8 @@ Pagination tests must prove that:
 - an entry too large for the requested byte limit returns `responseTooLarge` rather than looping; and
 - reset causes bounded re-enumeration without deleting independently verified local identity state.
 
+For `v1/changes`, status `1` alone encodes `ResetRequired` and carries no `errorCode`. Status `2` requires an error code. Tests must reject every status/field combination forbidden by Section 12.6 rather than accepting it merely because the Appendix A CDDL marks the union fields optional.
+
 ### 9.4 Synchronization
 
 Synchronization consumes another relay’s `v1/changes` feed. Full entries are untrusted candidates and pass through the ordinary ingress algorithm. References remain unverified routing hints.
@@ -378,6 +382,7 @@ The resolver must:
 - query multiple configured relays;
 - locally verify every Full candidate;
 - discard invalid candidates without treating them as valid `Absent` results;
+- preserve the distinction between Absent and a per-DID Error such as `premature`;
 - traverse references through matching directory generations;
 - perform cycle detection using the specified tuple;
 - retain and apply sticky RootRevoked state;
@@ -385,7 +390,7 @@ The resolver must:
 - expose freshness and staleness; and
 - implement all three migration-check states without automatic re-following.
 
-WebFinger support must verify the exact requested canonical `acct:` subject and require exactly one Followee DID relation. Handle claims in `alsoKnownAs` remain unverified until inverse lookup maps the exact handle back to the same DID.
+WebFinger support must verify the exact requested canonical `acct:` subject and require exactly one Followee DID relation. Handle claims in `alsoKnownAs` remain unverified until inverse lookup maps the exact handle back to the same DID. The demonstration handle authority must not assign ASCII-case variants under one domain to different DIDs; accepted variants are rejected or mapped as aliases to the same DID while exact-subject verification remains unchanged.
 
 The public WebFinger demonstration is deferred until the local resolver and relay tests pass. It may then use a tiny independently deployed HTTPS function with a provider-assigned domain; no purchased custom domain is required for the proof of concept.
 
@@ -555,6 +560,8 @@ The eventual integration suite must demonstrate:
 - references, directory generations and lazy path compression;
 - reference cycles and unreachable endpoints;
 - cursor reset;
+- all `changes` status-dependent required and forbidden field combinations;
+- a stored Full record becoming premature after an injected backwards clock correction, producing Error(`premature`) without a state or update-number change;
 - sticky revocation surviving Full-to-Ref conversion;
 - withheld and stale records;
 - handle discovery and inverse verification; and
@@ -762,6 +769,8 @@ Acceptance:
 
 - the relay passes Sections 20.1 and 20.2 tests applicable without peers;
 - update numbers change exactly when specified;
+- resolve distinguishes Absent from a retained but presently premature record;
+- `changes` uses status `1` as the sole ResetRequired signal and enforces every status-dependent field rule;
 - restart preserves identity, generation and sticky authority state; and
 - malformed and oversized input is bounded before expensive processing.
 
@@ -797,6 +806,7 @@ Deliver:
 Acceptance:
 
 - exact-subject and exactly-one-link requirements are tested;
+- ASCII-case variants cannot be assigned to different DIDs by the demonstration authority;
 - a signed `alsoKnownAs` claim is not called verified without inverse mapping;
 - disappearance or reassignment of a handle does not change the followed DID;
 - invalid bootstrap records are discarded locally; and

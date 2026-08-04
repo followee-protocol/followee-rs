@@ -6,6 +6,8 @@
 
 Followee gives a person a durable cryptographic identifier whose current contact document can point to feeds, websites, social profiles, handles, and other services. Applications follow the identifier rather than a platform account. Independent relays help clients find the latest signed record, but clients verify records themselves and do not trust relay assurances.
 
+No relay network is required for the first useful deployment. A domain can map a WebFinger handle to a Followee DID and expose the current signed record; a client verifies it locally. Relays later add replication, DID-only lookup, and independence from that original domain.
+
 ## Status
 
 **Pre-implementation.** The protocol specification and Rust implementation brief are complete enough to begin Milestone 0. No usable library, CLI, relay, resolver, or production identity system exists in this repository yet.
@@ -34,7 +36,7 @@ It will not define the protocol. If this code or its tests disagree with the nor
 - [Followee whitepaper](https://github.com/followee-protocol/followee/blob/main/Followee-Whitepaper.md) — motivation, design rationale, and security model
 - [Rust implementation brief](IMPLEMENTATION.md) — repository scope, architecture, test strategy, and milestone gates
 
-The Rust brief currently targets protocol repository commit `663c948`. When a normative ambiguity is resolved, the brief must be re-pinned and the complete conformance suite rerun.
+The Rust brief currently targets protocol repository commit `7e81d32f53f40ff8daf6cef77bceec4b6308c0b9`. When a normative ambiguity is resolved, the brief must be re-pinned and the complete conformance suite rerun.
 
 ## Design commitments
 
