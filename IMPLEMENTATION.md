@@ -18,8 +18,8 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned commit: `41f82fa272b96468363f2106f7923ad168f5bf82`
-- specification draft: `v0.4`
+- pinned commit: `44c68660f0c0a1e3504c0f9794b8c51058da6f18`
+- specification draft: `v0.6`
 - protocol version: `1`
 - DID method: `did:flw`
 
@@ -228,6 +228,8 @@ Expose typed representations for authoring and verified results, but keep untrus
 - `AuthorityState` is `Unknown`, `Root` or `RootRevoked`; and
 - result and error types preserve the protocol error classification.
 
+Candidate selection MUST take the expected target DID explicitly. It MUST NOT infer the selected identity from candidate arrival order. Verified records for other DIDs may be ignored or reported diagnostically, but they cannot choose the subject, winner, or sticky authority state for the target operation.
+
 Do not expose constructors that let callers fabricate `VerifiedRecord` or sticky `RootRevoked` state without verification.
 
 ### 7.2 Determinism
@@ -272,7 +274,7 @@ The creation command should permit the revocation key to be written directly to 
 
 The CLI may accept a friendly JSON Contact Document using field names rather than CBOR labels. This JSON is an implementation convenience and is not a Followee wire format.
 
-It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta.
+It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars in specification v0.6 Section 7.3; authoring and verification paths must apply the same grammar.
 
 ## 8. CLI surface
 
@@ -298,7 +300,7 @@ Exact flag names may evolve, but commands MUST support non-interactive use and m
 
 `record inspect` must clearly distinguish raw parsed claims from locally verified facts. It must not display a Contact Document as verified when verification was skipped or failed.
 
-`record select` accepts candidates in arbitrary order and returns the same winner and metadata for every permutation.
+`record select` requires an explicit target DID, accepts candidates in arbitrary order, and returns the same winner and metadata for every permutation. Adding or reordering valid records for unrelated DIDs MUST NOT change the target, winner, or sticky authority state.
 
 The CLI should return nonzero exit status on failure and provide stable symbolic error names. Raw secret material must never be emitted by a general `--verbose` or diagnostic mode.
 
@@ -672,7 +674,7 @@ Deliver:
 - formatting, linting and test CI;
 - `#![forbid(unsafe_code)]` at the crate root;
 - `cargo-audit` and `cargo-deny` configuration;
-- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; entries through the code-`7` symbolic rename and non-authoritative Absent/Error client rules must cite their resolution in specification v0.4 at the pinned commit rather than remain open;
+- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; entries through the code-`7` symbolic rename and non-authoritative Absent/Error client rules must cite their introduction in specification v0.4 and retention in specification v0.6 at the pinned commit rather than remain open;
 - injected clock and randomness traits; and
 - documented developer commands.
 
@@ -690,7 +692,7 @@ Deliver:
 - exact COSE Sign1 profile;
 - key and descriptor handling;
 - DID parsing and derivation;
-- Contact Document and record schemas;
+- Contact Document and record schemas, including the registry-independent service-metadata grammars fixed by specification v0.6;
 - signing, verification, digesting and ordering;
 - the sole production strict-Ed25519 entry point and mechanical direct-call restriction; and
 - complete Appendix B tests.
@@ -708,8 +710,11 @@ Acceptance:
 - the B.5 RootRevoked wiring test delegates exactly once with label `5`'s exact revealed revocation public key, COSE `Sig_structure` and received signature;
 - the public B.4 `S + L` test uses the non-injectable production record-verification wrapper;
 - CI rejects direct underlying-library verification calls outside the audited strict wrapper;
-- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications fixed by specification v0.4 at the pinned commit;
+- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained in specification v0.6 at the pinned commit;
 - B.8 fails specifically with `identityBindingMismatch` despite a valid attacker signature;
+- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or absolute URI, with no mutable registry lookup or normalization;
+- service collection tests enforce both the independent 64-entry cap and the aggregate member cap, including the effective maxima of 61 minimal Root services and 60 minimal RootRevoked services;
+- candidate selection takes an explicit target DID and remains permutation-independent over a mixed-identity candidate set, with every winner belonging to the target;
 - future-bound, stale-record, absolute RootRevoked-precedence, no-fallback and sticky-state-loss tests described in Section 11.1 pass;
 - no untrusted parser panic under the initial fuzz corpus;
 - all implemented MUST/MUST NOT requirements are mapped to tests; and
