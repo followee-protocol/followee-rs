@@ -66,9 +66,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz
+      - name: Reduce ASLR entropy for AddressSanitizer
+        # AddressSanitizer's shadow-memory mapping fails under the runner
+        # kernel's default vm.mmap_rnd_bits=32; 28 is the documented fix.
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      # The prebuilt cargo-fuzz binary is musl-linked and defaults the fuzz
+      # build to its own triple, where nightly has no std and ASan cannot
+      # link; pin the glibc host target explicitly.
       - name: Fuzz DID parsing
-        run: cargo +nightly fuzz run did_parse -- -max_total_time=45 -rss_limit_mb=1024
+        run: cargo +nightly fuzz run did_parse --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
       - name: Fuzz deterministic CBOR validation
-        run: cargo +nightly fuzz run cbor_validate -- -max_total_time=45 -rss_limit_mb=1024
+        run: cargo +nightly fuzz run cbor_validate --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
       - name: Fuzz record verification
-        run: cargo +nightly fuzz run verify_record -- -max_total_time=45 -rss_limit_mb=1024
+        run: cargo +nightly fuzz run verify_record --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
