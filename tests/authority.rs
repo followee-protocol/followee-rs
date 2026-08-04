@@ -44,7 +44,7 @@ fn sec_8_2_root_revoked_outranks_root_with_later_timestamp() {
         vec![late_root.clone(), early_revoked.clone()],
         vec![early_revoked.clone(), late_root.clone()],
     ] {
-        let selection = select_current(&candidates, NOW, AuthorityState::Unknown);
+        let selection = select_current(&alice_did(), &candidates, NOW, AuthorityState::Unknown);
         assert_eq!(
             selection.winner.expect("winner").authority(),
             Authority::RootRevoked,
@@ -57,7 +57,7 @@ fn sec_8_2_root_revoked_outranks_root_with_later_timestamp() {
 #[test]
 fn sec_8_2_every_root_record_is_excluded_after_sticky_revocation() {
     let roots = vec![make_root(NOW - 10_000, None), make_root(NOW - 1_000, None)];
-    let selection = select_current(&roots, NOW, AuthorityState::RootRevoked);
+    let selection = select_current(&alice_did(), &roots, NOW, AuthorityState::RootRevoked);
     assert!(
         selection.winner.is_none(),
         "no Root record may be selected while sticky RootRevoked is retained"
@@ -74,7 +74,7 @@ fn sec_8_2_no_last_good_root_fallback() {
     let bad_current = make_root(NOW - 10_000, None);
     let revoked = make_revoked(NOW - 5_000, None);
     let candidates = [pre_compromise, bad_current, revoked.clone()];
-    let selection = select_current(&candidates, NOW, AuthorityState::Unknown);
+    let selection = select_current(&alice_did(), &candidates, NOW, AuthorityState::Unknown);
     assert_eq!(
         selection.winner.expect("winner").body_digest(),
         revoked.body_digest(),
@@ -93,7 +93,7 @@ fn sec_8_2_stale_root_revoked_still_activates_transition() {
     );
     let later_root = make_root(NOW - 1_000, None);
     let candidates = [later_root, stale_revoked.clone()];
-    let selection = select_current(&candidates, NOW, AuthorityState::Unknown);
+    let selection = select_current(&alice_did(), &candidates, NOW, AuthorityState::Unknown);
     assert_eq!(
         selection.winner.expect("winner").body_digest(),
         stale_revoked.body_digest(),
@@ -108,6 +108,7 @@ fn sec_8_5_discarded_sticky_state_is_a_fresh_observer() {
     // it (models dropping the entry), the same candidates elect Root again.
     let root = make_root(NOW - 1_000, None);
     let retained = select_current(
+        &alice_did(),
         std::slice::from_ref(&root),
         NOW,
         AuthorityState::RootRevoked,
@@ -117,7 +118,12 @@ fn sec_8_5_discarded_sticky_state_is_a_fresh_observer() {
         "retained sticky state excludes Root"
     );
 
-    let fresh = select_current(std::slice::from_ref(&root), NOW, AuthorityState::Unknown);
+    let fresh = select_current(
+        &alice_did(),
+        std::slice::from_ref(&root),
+        NOW,
+        AuthorityState::Unknown,
+    );
     assert!(
         fresh.winner.is_some(),
         "a fresh observer with no sticky state can be shown withheld Root state"
@@ -130,6 +136,7 @@ fn sec_5_4_premature_candidates_are_excluded_at_the_exact_boundary() {
     let beyond = make_root(NOW + 300_001, None);
 
     let selection = select_current(
+        &alice_did(),
         std::slice::from_ref(&at_bound),
         NOW,
         AuthorityState::Unknown,
@@ -139,7 +146,12 @@ fn sec_5_4_premature_candidates_are_excluded_at_the_exact_boundary() {
         "exactly at now + skew is admissible"
     );
 
-    let selection = select_current(std::slice::from_ref(&beyond), NOW, AuthorityState::Unknown);
+    let selection = select_current(
+        &alice_did(),
+        std::slice::from_ref(&beyond),
+        NOW,
+        AuthorityState::Unknown,
+    );
     assert!(
         selection.winner.is_none(),
         "one past the bound is premature"
@@ -149,7 +161,7 @@ fn sec_5_4_premature_candidates_are_excluded_at_the_exact_boundary() {
     let premature_revoked = make_revoked(NOW + 300_001, None);
     let root = make_root(NOW - 1_000, None);
     let candidates = [root, premature_revoked];
-    let selection = select_current(&candidates, NOW, AuthorityState::Unknown);
+    let selection = select_current(&alice_did(), &candidates, NOW, AuthorityState::Unknown);
     assert_eq!(
         selection.winner.expect("winner").authority(),
         Authority::Root,
@@ -163,7 +175,7 @@ fn sec_8_3_later_timestamp_wins_within_root_revoked_state() {
     let older = make_revoked(NOW - 20_000, None);
     let newer = make_revoked(NOW - 10_000, None);
     let candidates = [older, newer.clone()];
-    let selection = select_current(&candidates, NOW, AuthorityState::RootRevoked);
+    let selection = select_current(&alice_did(), &candidates, NOW, AuthorityState::RootRevoked);
     assert_eq!(
         selection.winner.expect("winner").body_digest(),
         newer.body_digest()
@@ -174,7 +186,7 @@ fn sec_8_3_later_timestamp_wins_within_root_revoked_state() {
 fn duplicate_candidates_select_the_same_record() {
     let record = make_root(NOW - 1_000, None);
     let candidates = [record.clone(), record.clone(), record.clone()];
-    let selection = select_current(&candidates, NOW, AuthorityState::Unknown);
+    let selection = select_current(&alice_did(), &candidates, NOW, AuthorityState::Unknown);
     assert_eq!(
         selection.winner.expect("winner").body_digest(),
         record.body_digest()

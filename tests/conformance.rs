@@ -148,7 +148,7 @@ fn sec_b6_equal_time_ordering_selects_lower_digest() {
     // Same authority, same timestamp: the lower digest wins in either order.
     let now = B4_TIMESTAMP_MS;
     for candidates in [vec![a.clone(), b.clone()], vec![b.clone(), a.clone()]] {
-        let selection = select_current(&candidates, now, AuthorityState::Unknown);
+        let selection = select_current(&alice_did(), &candidates, now, AuthorityState::Unknown);
         assert_eq!(
             selection.winner.expect("winner exists").body_digest(),
             &fx32("alice_a_body_digest"),

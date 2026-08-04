@@ -42,26 +42,28 @@ pub struct Selection<'a> {
     pub authority_state: AuthorityState,
 }
 
-/// Selects the winning admissible record from verified candidates for one
-/// DID, applying premature exclusion, absolute RootRevoked precedence, sticky
-/// state, and deterministic ordering. The result is independent of candidate
-/// order.
+/// Selects the winning admissible record for `target` from verified
+/// candidates, applying premature exclusion, absolute RootRevoked precedence,
+/// sticky state, and deterministic ordering. The result is independent of
+/// candidate order.
 ///
-/// `sticky` is the caller's retained authority state; a returned
-/// `RootRevoked` state must be persisted by the caller to remain sticky.
+/// Selection is defined per identity, so the subject is an explicit
+/// parameter: candidates verified for a different DID are ignored, and a
+/// mixed-identity input cannot change the selected subject.
 ///
-/// Records whose DID differs from the first candidate's DID are ignored:
-/// selection is defined per identity.
+/// `sticky` is the caller's retained authority state for `target`; a
+/// returned `RootRevoked` state must be persisted by the caller to remain
+/// sticky.
 #[must_use]
 pub fn select_current<'a>(
+    target: &crate::did::FolloweeDid,
     candidates: &'a [VerifiedRecord],
     now_ms: u64,
     sticky: AuthorityState,
 ) -> Selection<'a> {
-    let subject = candidates.first().map(|c| c.body().id.clone());
     let admissible = || {
         candidates.iter().filter(|c| {
-            Some(&c.body().id) == subject.as_ref()
+            c.body().id == *target
                 && time_status(c.timestamp_ms(), now_ms) == TimeStatus::Admissible
         })
     };

@@ -31,6 +31,10 @@ jobs:
         run: cargo doc --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      - name: Specification vector fixture verification
+        run: |
+          python3 -m pip install --quiet cryptography
+          python3 tools/spec_vector_check.py
 
   audit:
     name: cargo audit
@@ -51,6 +55,26 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check bans, licences, advisories and sources
         uses: EmbarkStudios/cargo-deny-action@v2
+
+  coverage:
+    name: Line coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install llvm-tools
+        run: rustup component add llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Protocol-core line coverage (target ≥ 90%)
+        # IMPLEMENTATION.md section 11.7: coverage is reported and reviewed;
+        # direct tests per normative branch remain the actual bar. The stub
+        # binary is excluded until the Milestone 2 CLI replaces it.
+        run: cargo llvm-cov --locked --all-features --ignore-filename-regex 'src/bin/' --fail-under-lines 90
 
   fuzz-smoke:
     name: Bounded fuzz smoke

@@ -10,8 +10,9 @@ open question affects code delivered by that milestone. Resolving a question
 that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
-**All recorded questions are resolved.** Each resolved entry cites the resolving specification version and
-records the test obligation the resolution creates.
+SQ-9 is open and blocks final Milestone 1 acceptance; every other question
+is resolved. Each resolved entry cites the resolving specification version
+and records the test obligation the resolution creates.
 
 ---
 
@@ -40,7 +41,7 @@ SQ-8.
 **Test obligation (Milestone 1):**
 `sec_8_1_binding_case_a_foreign_target`, `sec_8_1_binding_case_b_mutated_id_original_target`,
 `sec_8_1_binding_case_c_mutated_id_mutated_target`, each asserting
-`descriptorMismatch`, with fixture provenance per IMPLEMENTATION.md
+`identityBindingMismatch`, with fixture provenance per IMPLEMENTATION.md
 sections 11.1 and 12.
 
 ## SQ-2 — Appendix B.7 item 2: `invalidDid` vs `unsupportedHash` classification
@@ -134,12 +135,13 @@ and per-DID `Error` results while budgets and unqueried relays remain, with
 `Error(premature)` being relay-local diagnostic information that must not
 affect candidates obtained elsewhere.
 
-Specification v0.5 additionally states that Absent and per-DID Error results
-are non-conclusive and budget-consuming, that resolution continues while
-selected unqueried relays and shared budgets remain, and that
+The v0.4 amendment also added the section 14.1 continuation rules: Absent and
+per-DID Error results are non-conclusive and budget-consuming, resolution
+continues while selected unqueried relays and shared budgets remain, and
 `Error(premature)` is relay-local diagnostic information which must not affect
-candidates obtained elsewhere or local sticky state (section 14.1; conformance
-items in section 20.3).
+candidates obtained elsewhere or local sticky state (conformance items in
+section 20.3). Specification v0.5 only corrected the Appendix B.8.3
+cross-reference.
 
 This implementation used the renamed symbol from the start
 (`VerifyError::IdentityBindingMismatch`, wire code 7), so the re-pin required
@@ -149,3 +151,41 @@ rerun against the new pin.
 **Test obligation (Milestone 4):**
 `sec_14_1_resolution_continues_past_absent_and_error`,
 `sec_14_1_error_premature_is_relay_local_diagnostic`.
+
+## SQ-9 — Normative syntax for service `mediaType`, `language`, and `rel`
+
+**Status:** open (raised by specification review, 2026-08-05) · **Blocks:**
+final Milestone 1 acceptance · **Spec:** section 7.3
+
+Section 7.3 constrains the optional service metadata only loosely ("ASCII
+media type", "BCP 47 language tag", "registered link-relation token"), and
+this implementation currently fills the gap with lightweight validators:
+
+- `mediaType` accepts any non-empty visible-ASCII string, including strings
+  that are not media types;
+- `language` accepts strings such as 64 consecutive letters, which are not
+  well-formed BCP 47 tags; and
+- `rel` permits uppercase letters and `_`, although RFC 8288 `reg-rel-type`
+  permits only a lowercase initial letter followed by lowercase letters,
+  digits, `.`, or `-`.
+
+Two conforming implementations could guess these grammars differently, which
+affects record validity and interoperability. Proposed resolution (from the
+specification review): pin each field to a named syntactic grammar with no
+registry dependence —
+
+1. `mediaType`: syntactically valid media-type name under a named RFC
+   (RFC 6838 restricted-name grammar), no registry lookup;
+2. `language`: syntactically well-formed RFC 5646 language tag, no registry
+   lookup or canonicalization; and
+3. `rel`: RFC 8288 `reg-rel-type` syntax or absolute URI, no IANA-membership
+   lookup.
+
+The current validators are held as implementation-status behaviour until the
+specification fixes the grammars; the affected helpers are
+`is_ascii_media_type`, `is_language_tag`, and `is_relation_token` in
+`src/contact.rs`.
+
+**Pending tests:** `sec_7_3_media_type_grammar`, `sec_7_3_language_tag_grammar`,
+`sec_7_3_relation_type_grammar` (positive and negative cases per the amended
+grammar), replacing the current shape-helper tests.
