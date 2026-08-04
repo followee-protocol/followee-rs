@@ -10,9 +10,9 @@ No relay network is required for the first useful deployment. A domain can map a
 
 ## Status
 
-**Milestone 1 (protocol core) delivered, under review.** The crate implements the complete Followee v1 protocol core against specification v0.5: strict deterministic CBOR, the exact COSE Sign1 profile, `did:flw` parsing and derivation, Authority Descriptors and revocation commitments, Contact Document and record schemas, signing, the sole strict-Ed25519 verification entry point with a mechanical direct-call restriction, full-record verification, deterministic ordering, and sticky root revocation. The complete Appendix B conformance suite reproduces every published byte sequence exactly and rejects every required mutation with fault-isolated fixtures; all recorded specification questions in [`SPEC-QUESTIONS.md`](SPEC-QUESTIONS.md) are resolved. No relay, resolver, HTTP, storage, or CLI code exists yet; Milestone 1.5 (the independently authored Python model) is the next gate before relay work.
+**Milestone 1 (protocol core) delivered, under review.** The crate implements the complete Followee v1 protocol core against specification v0.6: strict deterministic CBOR, the exact COSE Sign1 profile, `did:flw` parsing and derivation, Authority Descriptors and revocation commitments, Contact Document and record schemas, signing, the sole strict-Ed25519 verification entry point with a mechanical direct-call restriction, full-record verification, deterministic ordering, and sticky root revocation. The complete Appendix B conformance suite reproduces every published byte sequence exactly and rejects every required mutation with fault-isolated fixtures; all recorded specification questions in [`SPEC-QUESTIONS.md`](SPEC-QUESTIONS.md) are resolved. No relay, resolver, HTTP, storage, or CLI code exists yet; Milestone 1.5 (the independently authored Python model) is the next gate before relay work.
 
-[`tools/spec_vector_check.py`](tools/spec_vector_check.py) independently re-derives every Appendix B test-vector value from the specification text (27/27 reproduce byte-for-byte against v0.5). It is a spec-review aid, not the Milestone 1.5 clean-room model, and is excluded from that model's authoring context.
+[`tools/spec_vector_check.py`](tools/spec_vector_check.py) independently re-derives every Appendix B test-vector value from the specification text (27/27 reproduce byte-for-byte against v0.6). It is a spec-review aid, not the Milestone 1.5 clean-room model, and is excluded from that model's authoring context.
 
 Do not use `did:flw` for production identities. The DID method is not registered, the implementation has not passed conformance or interoperability testing, and the public keys in the protocol test vectors are deliberately backed by published private seeds.
 
@@ -36,7 +36,7 @@ It will not define the protocol. If this code or its tests disagree with the nor
 - [Followee whitepaper](https://github.com/followee-protocol/followee/blob/main/Followee-Whitepaper.md) — motivation, design rationale, and security model
 - [Rust implementation brief](IMPLEMENTATION.md) — repository scope, architecture, test strategy, and milestone gates
 
-The Rust brief currently targets protocol repository commit `41f82fa272b96468363f2106f7923ad168f5bf82` (specification v0.5). When a normative ambiguity is resolved, the brief must be re-pinned and the complete conformance suite rerun.
+The Rust brief currently targets protocol repository commit `44c68660f0c0a1e3504c0f9794b8c51058da6f18` (specification v0.6). When a normative ambiguity is resolved, the brief must be re-pinned and the complete conformance suite rerun.
 
 ## Design commitments
 

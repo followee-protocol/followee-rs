@@ -1,11 +1,11 @@
 {
   "_provenance": {
     "source": "followee-protocol/followee Followee-Specification.md Appendix B",
-    "spec_version": "v0.5",
-    "pinned_commit": "41f82fa272b96468363f2106f7923ad168f5bf82",
+    "spec_version": "v0.6",
+    "pinned_commit": "44c68660f0c0a1e3504c0f9794b8c51058da6f18",
     "derivation_status": "specification",
     "method": "mechanically extracted from the pinned specification markdown",
-    "spec_sha256": "016bf8fcd1a828b167b6849684ede6d71d151afdd991f828f9863952c7587546"
+    "spec_sha256": "09e5f70c0cc6a3e0d2cf99471437e0e7099e3413046791fcce0931147671ce5f"
   },
   "root_seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
   "root_public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",

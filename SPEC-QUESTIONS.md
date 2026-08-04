@@ -3,16 +3,16 @@
 Ambiguities identified in the normative specification
 (`followee-protocol/followee`), tracked against the pinned commit in
 IMPLEMENTATION.md section 2 (currently
-`41f82fa272b96468363f2106f7923ad168f5bf82`, specification v0.5). Per
+`44c68660f0c0a1e3504c0f9794b8c51058da6f18`, specification v0.6). Per
 IMPLEMENTATION.md section 2, questions are resolved in the protocol repository
 — never silently in this implementation — and no milestone may pass while an
 open question affects code delivered by that milestone. Resolving a question
 that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
-SQ-9 is open and blocks final Milestone 1 acceptance; every other question
-is resolved. Each resolved entry cites the resolving specification version
-and records the test obligation the resolution creates.
+**All recorded questions are resolved**, and every resolution remains in
+force in specification v0.6 at the pinned commit. Each resolved entry cites
+the amending version and records the test obligation the resolution creates.
 
 ---
 
@@ -154,8 +154,7 @@ rerun against the new pin.
 
 ## SQ-9 — Normative syntax for service `mediaType`, `language`, and `rel`
 
-**Status:** open (raised by specification review, 2026-08-05) · **Blocks:**
-final Milestone 1 acceptance · **Spec:** section 7.3
+**Status:** resolved (spec v0.6, commit `44c6866`) · **Affected:** Milestone 1 · **Spec:** section 7.3
 
 Section 7.3 constrains the optional service metadata only loosely ("ASCII
 media type", "BCP 47 language tag", "registered link-relation token"), and
@@ -169,23 +168,26 @@ this implementation currently fills the gap with lightweight validators:
   permits only a lowercase initial letter followed by lowercase letters,
   digits, `.`, or `-`.
 
-Two conforming implementations could guess these grammars differently, which
-affects record validity and interoperability. Proposed resolution (from the
-specification review): pin each field to a named syntactic grammar with no
-registry dependence —
+Two conforming implementations could have guessed these grammars
+differently. Resolved by the v0.6 amendment, which pins each field to a
+named syntactic grammar with no registry dependence:
 
-1. `mediaType`: syntactically valid media-type name under a named RFC
-   (RFC 6838 restricted-name grammar), no registry lookup;
-2. `language`: syntactically well-formed RFC 5646 language tag, no registry
-   lookup or canonicalization; and
-3. `rel`: RFC 8288 `reg-rel-type` syntax or absolute URI, no IANA-membership
-   lookup.
+1. `mediaType`: exactly an RFC 6838 `type-name`, `/`, and `subtype-name`,
+   each satisfying the section 4.2 `restricted-name` grammar; no parameters;
+2. `language`: well-formed RFC 5646 `Language-Tag` ABNF **including the fixed
+   grandfathered productions**, verified case-insensitively with the exact
+   signed text retained; no registry lookup or canonicalization; and
+3. `rel`: RFC 8288 `reg-rel-type` exactly (one lowercase letter, then
+   lowercase letters, digits, `.`, or `-`) or an absolute URI; no
+   IANA-membership lookup.
 
-The current validators are held as implementation-status behaviour until the
-specification fixes the grammars; the affected helpers are
-`is_ascii_media_type`, `is_language_tag`, and `is_relation_token` in
-`src/contact.rs`.
+Registry contents are explicitly not inputs to record validity: a registry
+update cannot change whether existing signed bytes verify. Implemented in
+`src/contact.rs` (`is_media_type`/`is_restricted_name`, `is_language_tag`
+with the 26 grandfathered tags, `is_relation_token`), replacing the
+provisional validators.
 
-**Pending tests:** `sec_7_3_media_type_grammar`, `sec_7_3_language_tag_grammar`,
-`sec_7_3_relation_type_grammar` (positive and negative cases per the amended
-grammar), replacing the current shape-helper tests.
+**Test obligation (Milestone 1, done):** grammar positive/negative vectors in
+`contact::tests` (`sec_7_3_service_token_shape_helpers`), at-limit boundary
+twins updated to grammar-valid values, and reachability through
+`ServiceEntry::validate`.

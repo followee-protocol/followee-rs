@@ -127,29 +127,173 @@ fn is_unreserved_ascii(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
 }
 
-/// Minimal ASCII shape check for a media type. The specification constrains
-/// the field to "ASCII media type, maximum 256 bytes"; this enforces the
-/// stated ASCII and length constraints plus visible characters only, without
-/// inventing a full RFC 6838 grammar the specification does not require.
-fn is_ascii_media_type(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_graphic())
+/// RFC 6838 section 4.2 `restricted-name`: one ALPHA/DIGIT first character,
+/// then at most 126 further characters from ALPHA / DIGIT /
+/// `! # $ & - ^ _ . +`.
+fn is_restricted_name(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let Some((&first, rest)) = bytes.split_first() else {
+        return false;
+    };
+    first.is_ascii_alphanumeric()
+        && rest.len() <= 126
+        && rest.iter().all(|&b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'!' | b'#' | b'$' | b'&' | b'-' | b'^' | b'_' | b'.' | b'+'
+                )
+        })
 }
 
-/// Minimal well-formedness for a BCP 47 tag: ASCII alphanumerics and single
-/// hyphens, no leading or trailing hyphen. Registry validity is not checked.
+/// `mediaType` (specification section 7.3, v0.6): exactly an RFC 6838
+/// `type-name`, `/`, and `subtype-name`; no parameters.
+fn is_media_type(s: &str) -> bool {
+    match s.split_once('/') {
+        Some((type_name, subtype_name)) => {
+            is_restricted_name(type_name) && is_restricted_name(subtype_name)
+        }
+        None => false,
+    }
+}
+
+/// The fixed RFC 5646 `grandfathered` productions, normatively included by
+/// specification section 7.3 (v0.6). Matching is case-insensitive; callers
+/// pass a lowercased tag.
+const GRANDFATHERED_TAGS: [&str; 26] = [
+    // irregular
+    "en-gb-oed",
+    "i-ami",
+    "i-bnn",
+    "i-default",
+    "i-enochian",
+    "i-hak",
+    "i-klingon",
+    "i-lux",
+    "i-mingo",
+    "i-navajo",
+    "i-pwn",
+    "i-tao",
+    "i-tay",
+    "i-tsu",
+    "sgn-be-fr",
+    "sgn-be-nl",
+    "sgn-ch-de",
+    // regular
+    "art-lojban",
+    "cel-gaulish",
+    "no-bok",
+    "no-nyn",
+    "zh-guoyu",
+    "zh-hakka",
+    "zh-min",
+    "zh-min-nan",
+    "zh-xiang",
+];
+
+/// `language` (specification section 7.3, v0.6): well-formed RFC 5646
+/// `Language-Tag` ABNF, including the fixed grandfathered productions.
+/// Verification is case-insensitive; the exact signed text is retained by
+/// the caller. No registry lookup or canonicalization is performed.
 fn is_language_tag(s: &str) -> bool {
-    !s.is_empty()
-        && !s.starts_with('-')
-        && !s.ends_with('-')
-        && !s.contains("--")
-        && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    if s.is_empty() || !s.is_ascii() {
+        return false;
+    }
+    let lower = s.to_ascii_lowercase();
+    if GRANDFATHERED_TAGS.contains(&lower.as_str()) {
+        return true;
+    }
+    let parts: Vec<&str> = lower.split('-').collect();
+    // Empty segments cover leading/trailing/double hyphens.
+    if parts.iter().any(|p| p.is_empty()) {
+        return false;
+    }
+    let alpha = |p: &str| p.bytes().all(|b| b.is_ascii_lowercase());
+    let digit = |p: &str| p.bytes().all(|b| b.is_ascii_digit());
+    let alnum = |p: &str| {
+        p.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    };
+
+    // privateuse = "x" 1*("-" (1*8alphanum))
+    if parts[0] == "x" {
+        let rest = &parts[1..];
+        return !rest.is_empty() && rest.iter().all(|p| p.len() <= 8 && alnum(p));
+    }
+
+    // langtag = language ["-" script] ["-" region] *variant *extension ["-" privateuse]
+    let mut i = 1;
+    match parts[0].len() {
+        // language = 2*3ALPHA ["-" extlang]; extlang = up to three 3ALPHA.
+        2 | 3 if alpha(parts[0]) => {
+            let mut extlangs = 0u8;
+            while i < parts.len() && extlangs < 3 && parts[i].len() == 3 && alpha(parts[i]) {
+                i = i.saturating_add(1);
+                extlangs = extlangs.saturating_add(1);
+            }
+        }
+        4..=8 if alpha(parts[0]) => {}
+        _ => return false,
+    }
+    // script = 4ALPHA
+    if i < parts.len() && parts[i].len() == 4 && alpha(parts[i]) {
+        i = i.saturating_add(1);
+    }
+    // region = 2ALPHA / 3DIGIT
+    if i < parts.len()
+        && ((parts[i].len() == 2 && alpha(parts[i])) || (parts[i].len() == 3 && digit(parts[i])))
+    {
+        i = i.saturating_add(1);
+    }
+    // variant = 5*8alphanum / DIGIT 3alphanum
+    while i < parts.len() {
+        let p = parts[i];
+        let is_variant = (p.len() >= 5 && p.len() <= 8 && alnum(p))
+            || (p.len() == 4 && p.as_bytes()[0].is_ascii_digit() && alnum(p));
+        if !is_variant {
+            break;
+        }
+        i = i.saturating_add(1);
+    }
+    // extension = singleton 1*("-" 2*8alphanum); singleton excludes "x".
+    while i < parts.len() && parts[i].len() == 1 && parts[i] != "x" && alnum(parts[i]) {
+        i = i.saturating_add(1);
+        let mut ext_parts = 0u8;
+        while i < parts.len() && parts[i].len() >= 2 && parts[i].len() <= 8 && alnum(parts[i]) {
+            i = i.saturating_add(1);
+            ext_parts = ext_parts.saturating_add(1);
+        }
+        if ext_parts == 0 {
+            return false;
+        }
+    }
+    // privateuse = "x" 1*("-" 1*8alphanum)
+    if i < parts.len() && parts[i] == "x" {
+        i = i.saturating_add(1);
+        let mut private_parts = 0u8;
+        while i < parts.len() && parts[i].len() <= 8 && alnum(parts[i]) {
+            i = i.saturating_add(1);
+            private_parts = private_parts.saturating_add(1);
+        }
+        if private_parts == 0 {
+            return false;
+        }
+    }
+    i == parts.len()
 }
 
-/// Link-relation token per RFC 8288 registered-name shape.
+/// The token form of `rel` (specification section 7.3, v0.6): RFC 8288
+/// `reg-rel-type` exactly — one lowercase ASCII letter, then zero or more
+/// lowercase letters, digits, `.`, or `-`.
 fn is_relation_token(s: &str) -> bool {
-    !s.is_empty()
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+    let bytes = s.as_bytes();
+    let Some((&first, rest)) = bytes.split_first() else {
+        return false;
+    };
+    first.is_ascii_lowercase()
+        && rest
+            .iter()
+            .all(|&b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'))
 }
 
 impl ContactDocument {
@@ -259,7 +403,7 @@ impl ServiceEntry {
         }
         check_uri(&self.endpoint, MAX_URI_BYTES)?;
         if let Some(mt) = &self.media_type
-            && (mt.len() > MAX_SERVICE_TOKEN_BYTES || !is_ascii_media_type(mt))
+            && (mt.len() > MAX_SERVICE_TOKEN_BYTES || !is_media_type(mt))
         {
             return Err(VerifyError::SchemaViolation);
         }
@@ -630,27 +774,73 @@ mod tests {
         assert!(!is_unreserved_ascii("słow"));
         assert!(!is_unreserved_ascii("a/b"));
 
-        // Media type: non-empty visible ASCII.
-        assert!(is_ascii_media_type("application/atom+xml"));
-        assert!(!is_ascii_media_type(""));
-        assert!(!is_ascii_media_type("text plain"));
-        assert!(!is_ascii_media_type("text\tplain"));
-        assert!(!is_ascii_media_type("tëxt/plain"));
+        // sec_7_3_media_type_grammar: exactly RFC 6838 type "/" subtype,
+        // both restricted-name, no parameters.
+        assert!(is_media_type("application/atom+xml"));
+        assert!(is_media_type("text/html"));
+        assert!(is_media_type("A/B"));
+        assert!(is_media_type("x-custom/v1.2+json"));
+        assert!(is_media_type(&format!(
+            "{}/{}",
+            "a".repeat(127),
+            "b".repeat(127)
+        )));
+        assert!(!is_media_type(""));
+        assert!(!is_media_type("text"));
+        assert!(!is_media_type("text/"));
+        assert!(!is_media_type("/plain"));
+        assert!(!is_media_type("text/plain; charset=utf-8"));
+        assert!(!is_media_type("text plain"));
+        assert!(!is_media_type("tëxt/plain"));
+        assert!(!is_media_type("-text/plain"));
+        assert!(!is_media_type("text/pl/ain"));
+        assert!(!is_media_type(&format!("{}/{}", "a".repeat(128), "b")));
 
-        // Language tag: ASCII alphanumerics and single interior hyphens.
+        // sec_7_3_language_tag_grammar: well-formed RFC 5646 Language-Tag,
+        // grandfathered included, case-insensitive, no registry lookups.
         assert!(is_language_tag("en"));
         assert!(is_language_tag("en-US"));
-        assert!(is_language_tag("x-a1"));
+        assert!(is_language_tag("EN-us"));
+        assert!(is_language_tag("zh-Hant-CN"));
+        assert!(is_language_tag("sl-rozaj-biske"));
+        assert!(is_language_tag("de-DE-1996"));
+        assert!(is_language_tag("en-a-bbb-x-a-cccc"));
+        assert!(is_language_tag("x-priv-a1"));
+        assert!(is_language_tag("i-klingon"));
+        assert!(is_language_tag("en-GB-oed"));
+        assert!(is_language_tag("zh-min-nan"));
+        assert!(is_language_tag("ar-aao"));
+        assert!(is_language_tag("abcd"));
+        assert!(is_language_tag("abcdefgh"));
+        assert!(is_language_tag("ab-abc-abc-abc"));
         assert!(!is_language_tag(""));
+        assert!(!is_language_tag("a"));
+        assert!(!is_language_tag("abcdefghi"));
+        assert!(!is_language_tag("12"));
+        assert!(!is_language_tag("1a"));
+        assert!(!is_language_tag("ab-abc-abc-abc-abc"));
+        assert!(!is_language_tag("en-12"));
+        assert!(!is_language_tag("en-Latn-abc"));
+        assert!(!is_language_tag("en-Latn-abcd"));
+        assert!(!is_language_tag("x-abcdefghi"));
+        assert!(!is_language_tag(&"a".repeat(64)));
         assert!(!is_language_tag("-en"));
         assert!(!is_language_tag("en-"));
         assert!(!is_language_tag("en--US"));
         assert!(!is_language_tag("en_US"));
+        assert!(!is_language_tag("en-a"));
+        assert!(!is_language_tag("x"));
+        assert!(!is_language_tag("en-abcdefghi"));
+        assert!(!is_language_tag("en-€"));
 
-        // Relation token: alphanumerics plus . - _.
+        // sec_7_3_relation_type_grammar: RFC 8288 reg-rel-type exactly.
         assert!(is_relation_token("alternate"));
-        assert!(is_relation_token("x.custom-rel_1"));
+        assert!(is_relation_token("describedby"));
+        assert!(is_relation_token("a1.-"));
         assert!(!is_relation_token(""));
+        assert!(!is_relation_token("Alternate"));
+        assert!(!is_relation_token("x_custom"));
+        assert!(!is_relation_token("1abc"));
         assert!(!is_relation_token("has space"));
         assert!(!is_relation_token("rel!"));
     }
@@ -710,11 +900,19 @@ mod tests {
             (|s, v| s.id = v, "i".repeat(256), "i".repeat(257)),
             (|s, v| s.label = Some(v), "l".repeat(256), "l".repeat(257)),
             (
+                // The grammar's maximum is 255 bytes (127 + "/" + 127),
+                // inside the 256-byte cap; the over case breaks the cap.
                 |s, v| s.media_type = Some(v),
-                "m".repeat(256),
-                "m".repeat(257),
+                format!("{}/{}", "m".repeat(127), "m".repeat(127)),
+                format!("{}/{}", "m".repeat(127), "m".repeat(129)),
             ),
-            (|s, v| s.language = Some(v), "a".repeat(64), "a".repeat(65)),
+            (
+                // A well-formed RFC 5646 tag of exactly 64 bytes (language
+                // plus variant subtags); one more subtag crosses the cap.
+                |s, v| s.language = Some(v),
+                format!("en{}-abcdefg", "-abcdefgh".repeat(6)),
+                format!("en{}", "-abcdefgh".repeat(7)),
+            ),
             (|s, v| s.rel = Some(v), "r".repeat(256), "r".repeat(257)),
         ];
         for (set, at_limit, over) in cases {
