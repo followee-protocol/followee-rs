@@ -4,7 +4,7 @@
     "derivation_status": "implementation",
     "spec_version": "v0.7",
     "pinned_commit": "abc9a55d90f1026e6509207abda73e5dc6d14241",
-    "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14; the identityBindingMismatch symbol is normative as of specification v0.4). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations."
+    "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14, and 17; the identityBindingMismatch symbol is normative as of specification v0.4). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations."
   },
   "cases": [
     {

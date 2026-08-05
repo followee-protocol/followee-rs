@@ -481,7 +481,10 @@ impl Migration {
     }
 }
 
-fn validate_extension_map(map: &ExtensionMap) -> Result<(), VerifyError> {
+/// Validates an extension map's key and value rules. This single function
+/// serves both the contact-level (label 6) and record-level (label 8)
+/// extension positions; there is deliberately no second implementation.
+pub(crate) fn validate_extension_map(map: &ExtensionMap) -> Result<(), VerifyError> {
     for (uri, value) in map {
         if uri.len() > MAX_EXTENSION_KEY_BYTES || !is_uri(uri) {
             return Err(VerifyError::SchemaViolation);

@@ -908,3 +908,31 @@ fn boolean_labels_rejected_in_every_other_fixed_label_map() {
     let envelope = seal(&body_with_contact(contact), &root_seed());
     assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
 }
+
+#[test]
+fn raw_record_level_extension_with_relative_key_remains_rejected() {
+    // The receive-side guarantee the authoring fix mirrors: a raw record
+    // whose record-level extension key is a relative reference is rejected.
+    let ext = r_map(&[(r_tstr("/relative"), r_uint(1))]);
+    let mut entries = b4_raw_entries();
+    entries.push((r_uint(8), ext));
+    let envelope = seal(&r_map(&entries), &root_seed());
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+
+    // And the accepted twin: a record-level key with query and fragment.
+    let ext = r_map(&[(r_tstr("https://example.com/ext?v=1#frag"), r_uint(1))]);
+    let mut entries = b4_raw_entries();
+    entries.push((r_uint(8), ext));
+    let envelope = seal(&r_map(&entries), &root_seed());
+    assert!(verify_alice(&envelope).is_ok());
+}
+
+#[test]
+fn boolean_protected_header_label_is_rejected() {
+    // Protected header {true: -19} = a1 f5 32 instead of {1: -19}: the only
+    // fixed-label map not previously in the Boolean sweep. Re-signed over
+    // the mutated protected bytes so the label type is the single fault.
+    let payload = r_map(&b4_raw_entries());
+    let envelope = seal_with_protected(&[0xa1, 0xf5, 0x32], &payload, &root_seed());
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+}

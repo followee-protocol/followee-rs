@@ -137,6 +137,10 @@ impl RecordBody {
             return Err(VerifyError::SchemaViolation);
         }
         self.contact.validate(Some(self.id.as_str()))?;
+        // Record-level extensions (label 8) obey exactly the same rules as
+        // contact-level extensions and are checked by the same function, so
+        // the typed authoring path cannot sign what the parser rejects.
+        contact::validate_extension_map(&self.extensions)?;
         Ok(())
     }
 

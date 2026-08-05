@@ -196,8 +196,8 @@ twins updated to grammar-valid values, and reachability through
 
 **Status:** resolved (spec v0.7, commit `abc9a55`) · **Affected:** Milestone 1 · **Spec:** sections 7.2, 20.1; Appendix B.7 item 17
 
-Recorded for bookkeeping: the v0.7 amendment (driven by clean-room
-differential review) changed two Milestone 1 obligations.
+Recorded for bookkeeping: the v0.7 amendment (driven by independent
+clean-room review) changed two Milestone 1 obligations.
 
 1. **URI production.** Section 7.2 now requires the RFC 3986 section 3 `URI`
    production — scheme required, optional query and fragment permitted —
@@ -207,7 +207,8 @@ differential review) changed two Milestone 1 obligations.
    case-insensitive under RFC 5234). Implemented by switching the single URI
    validator to the `URI` type (`is_uri` in `src/contact.rs`) and exercising
    it through every URI-bearing position: avatar, `alsoKnownAs`, service
-   endpoint, URI-form service type, URI-form `rel`, and extension keys.
+   endpoint, URI-form service type, URI-form `rel`, contact-level extension
+   keys (label 6), and record-level extension keys (label 8).
 
 2. **Exact CBOR label typing.** Appendix B.7 item 17 adds conformance cases
    substituting CBOR `false`/`true` for unsigned-integer labels `0`/`1` in

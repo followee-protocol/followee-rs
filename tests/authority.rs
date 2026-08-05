@@ -280,3 +280,66 @@ fn authoring_accepts_at_limit_sizes_and_rejects_just_over() {
         Err(followee::record::SignError::RecordTooLarge)
     ));
 }
+
+#[test]
+fn record_level_extensions_validate_through_the_typed_authoring_path() {
+    use followee::contact::{ExtensionKey, ExtensionValue};
+    use followee::record::SignError;
+
+    // A record-level extension key with query and fragment is accepted end
+    // to end: typed validation, encoding, signing, and verification.
+    let mut body = b4_body();
+    body.extensions.insert(
+        "https://example.com/ext?v=1#frag".to_owned(),
+        ExtensionValue::Unsigned(1),
+    );
+    assert!(body.validate().is_ok(), "typed validation accepts");
+    let envelope = sign_record(&body, &root_seed()).expect("signs");
+    let verified = verify_record(&alice_did(), &envelope).expect("verifies");
+    assert_eq!(verified.body(), &body, "round-trips");
+
+    // Every relative-reference form as a record-level extension key is
+    // rejected by the typed path before anything can be signed.
+    for bad in ["//example.com/x", "/ext", "ext", "?v=1", "#frag", ""] {
+        let mut body = b4_body();
+        body.extensions
+            .insert(bad.to_owned(), ExtensionValue::Unsigned(1));
+        assert!(
+            matches!(
+                sign_record(&body, &root_seed()),
+                Err(SignError::InvalidBody(_))
+            ),
+            "relative reference {bad:?} must not sign"
+        );
+    }
+
+    // An invalid nested value — duplicate deterministically encoded map keys
+    // — cannot be signed through the typed path either.
+    let mut body = b4_body();
+    body.extensions.insert(
+        "https://example.com/ext".to_owned(),
+        ExtensionValue::Map(vec![
+            (ExtensionKey::Unsigned(1), ExtensionValue::Null),
+            (ExtensionKey::Unsigned(1), ExtensionValue::Bool(true)),
+        ]),
+    );
+    assert!(matches!(
+        sign_record(&body, &root_seed()),
+        Err(SignError::InvalidBody(_))
+    ));
+
+    // Parity: the identical invalid map is rejected the same way at the
+    // contact level, because both levels call the same validation function.
+    let mut contact_body = b4_body();
+    contact_body.contact.extensions.insert(
+        "https://example.com/ext".to_owned(),
+        ExtensionValue::Map(vec![
+            (ExtensionKey::Unsigned(1), ExtensionValue::Null),
+            (ExtensionKey::Unsigned(1), ExtensionValue::Bool(true)),
+        ]),
+    );
+    assert!(matches!(
+        sign_record(&contact_body, &root_seed()),
+        Err(SignError::InvalidBody(_))
+    ));
+}

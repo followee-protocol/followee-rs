@@ -67,6 +67,14 @@ above. No surviving mutant weakens a normative or security-sensitive branch.
 The raw `mutants.out/` report is untracked (regenerable) and retained
 locally as review evidence.
 
+**Review-fix addendum (post-`d23d660` independent review):** after wiring
+`validate_extension_map` into `RecordBody::validate` and adding the Boolean
+protected-header case, a scoped sweep over both changed files
+(`src/contact.rs`, `src/record.rs`) reported 333 mutants: 312 caught, 16
+unviable, 5 missed — all five already explained in the table above (the
+`is_language_tag` entry guard, the media-type length-cap pair, and the
+descriptor/public-key head-check equivalent-outcome pair). No new survivor.
+
 **v0.7 re-pin addendum:** after the section 7.2 URI-production change and the
 Appendix B.7 item 17 additions, a scoped sweep over the changed parser file
 (`src/contact.rs`) reported 239 mutants: 226 caught, 10 unviable, 3 missed —
