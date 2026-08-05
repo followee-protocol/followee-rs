@@ -18,8 +18,8 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned commit: `44c68660f0c0a1e3504c0f9794b8c51058da6f18`
-- specification draft: `v0.6`
+- pinned commit: `abc9a55d90f1026e6509207abda73e5dc6d14241`
+- specification draft: `v0.7`
 - protocol version: `1`
 - DID method: `did:flw`
 
@@ -28,6 +28,8 @@ The whitepaper is design rationale, not a wire-format authority.
 The implementation MUST NOT silently invent behaviour when the specification is ambiguous. Record the ambiguity in `SPEC-QUESTIONS.md`, write the smallest failing or pending test that demonstrates it, and resolve it in the protocol repository before depending on an interpretation.
 
 No milestone may pass while `SPEC-QUESTIONS.md` contains an unresolved question that affects code in that milestone. If resolving a question amends the normative specification, update the pinned commit in this section, record the change in the implementation repository, and rerun the complete conformance and differential suite. A previous green result against another commit is not inherited automatically.
+
+The v0.7 amendment preserves the Appendix B positive bytes but changes normative URI acceptance and adds exact CBOR label-type conformance cases. The previous Milestone 1 result against v0.6 therefore remains useful evidence but is not a v0.7 result. Before beginning Milestone 2, the Rust core and the independently maintained Python model must both be updated against this pin, their complete suites rerun, and the affected shared cases compared under Sections 11.4 and 12.
 
 ## 3. Implementation status and naming
 
@@ -274,7 +276,7 @@ The creation command should permit the revocation key to be written directly to 
 
 The CLI may accept a friendly JSON Contact Document using field names rather than CBOR labels. This JSON is an implementation convenience and is not a Followee wire format.
 
-It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars in specification v0.6 Section 7.3; authoring and verification paths must apply the same grammar.
+It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars introduced in specification v0.6 Section 7.3 and retained by v0.7; authoring and verification paths must apply the same grammar. Every URI-valued field MUST use the v0.7 Section 7.2 `URI` production, including optional query and fragment components, rather than the fragment-excluding RFC 3986 `absolute-URI` production.
 
 ## 8. CLI surface
 
@@ -443,6 +445,7 @@ Use the following construction plan:
 | 14 | Use the exact `S + L` Followee-envelope fixture below for scalar canonicality. Test the harder point, subgroup and verification-equation cases with vetted external strict-Ed25519 primitive vectors unless a Followee-envelope construction is independently established. Do not hand-roll or casually re-sign these vectors. |
 | 15 | Set `validUntil_ms < timestamp_ms` and re-sign the mutated payload with the legitimate applicable key. |
 | 16 | Expand into boundary fixtures for each relevant aggregate hard limit. Re-sign whenever signed material changes, and construct each case so an earlier unrelated cap—especially the 16 KiB envelope limit—does not mask the intended failure. |
+| 17 | Replace unsigned-integer label `0` or `1` with the CBOR simple value `false` or `true` in the Authority Descriptor and nested public-key object. Cover both Boolean values at both schema levels. At least one complete case must derive its target DID from the Boolean-labelled descriptor and carry a valid signature from that descriptor's applicable key, isolating exact `schemaViolation` rather than signature or identity-binding failure. |
 
 ##### Item 14 strict-Ed25519 cases
 
@@ -463,7 +466,7 @@ For every external cryptographic vector, record its stable source, vector identi
 
 Primitive fixtures must invoke the same production `crypto::verify_followee_ed25519` entry point used by record verification. They must not call a test-only strict helper or bypass wrapper. In addition, both record-path wiring tests from Section 6.2 must capture and compare the authority-specific public key, full message bytes and signature passed by their complete parsed envelopes. Together with the public-path B.4 `S + L` case and the mechanical direct-call restriction, this establishes that primitive conformance is connected to both record-verification authority branches rather than merely present somewhere in the codebase.
 
-Before Milestone 1 begins, the protocol repository must replace or supplement Appendix B.7 with unambiguous construction recipes and expected errors. Until that amendment is committed and Section 2 is re-pinned, items 1 and 2 remain unresolved specification questions and the affected conformance cases remain `implementation` rather than `specification` fixtures.
+Specification v0.4 resolved the former Appendix B.7 item 1 and item 2 ambiguities with unambiguous constructions and expected errors, and v0.7 retains those resolutions while adding item 17. A fixture is `specification`-status only when it follows the applicable normative construction exactly; merely citing the appendix does not promote independently chosen bytes or a multi-fault mutation.
 
 Appendix B does not by itself cover every security-bearing branch in Sections 5 and 8. Milestone 1 therefore also requires locally authored, explicitly provisional tests for:
 
@@ -475,6 +478,13 @@ Appendix B does not by itself cover every security-bearing branch in Sections 5 
 - exclusion of every Root record after sticky revocation;
 - absence of any “last good Root” fallback; and
 - Section 8.5 behaviour after sticky state is deliberately discarded, distinguished from behaviour while it is retained.
+
+Specification v0.7 Section 20.1 additionally requires URI-profile cases that:
+
+- accept scheme-bearing URIs with optional queries and fragments, including `https://example.com/profile?view=full#about` and `did:web:example.com#key-1`;
+- reject network-path, absolute-path, relative-path, query-only and fragment-only references;
+- accept otherwise valid RFC 3986 `IPvFuture` hosts introduced by either lowercase `v` or uppercase `V`; and
+- exercise the same URI parser through every Contact Document position that admits a URI, rather than testing a helper that the record path does not call.
 
 These tests must not be represented as specification-published byte vectors until their expected results have the fixture provenance described in Section 12.
 
@@ -512,17 +522,29 @@ That model is useful for catching state-machine implementation mistakes but is n
 
 ### 11.4 Independent Python core model
 
-Create a small, deliberately direct Python implementation of Sections 3 through 8 under `tools/python-model/`. Its purpose is to detect comprehension errors shared by the Rust production code and its same-language test model.
+Maintain the small, deliberately direct Python implementation of Sections 3 through 8 in the separate public repository <https://github.com/followee-protocol/followee-python-cleanroom>, under that repository's `tools/python-model/` path. Its purpose is to detect comprehension errors shared by the Rust production code and its same-language test model. It MUST NOT be copied into this repository or made dependent on the Rust crate.
+
+The independently authored v0.6 baseline is preserved as follows:
+
+| Artefact | Revision |
+| --- | --- |
+| Approved-input commit | `70b393fa15d7fa550b1864ff28a86a8a20726561` |
+| Original independently authored freeze | `7ca1f623453065deefd1e6cfdf15e135d523dd7e` (`cleanroom-v0.6-freeze`) |
+| Post-freeze reviewed correction | `70e4a6caa8720f1dfbb3b183a5d305fca0cf3e57` (`cleanroom-v0.6-review1`) |
+
+The reviewed correction rejects Boolean CBOR keys masquerading as integer labels and accepts uppercase as well as lowercase `IPvFuture` introducers. Its parent is the original freeze, its authoring record states that no excluded Rust or provisional material was revealed, and its public tag passes the complete 160-test clean-room suite. The original freeze tag remains immutable evidence of the model as first authored; the reviewed tag does not replace or rewrite it.
 
 Independence requirements:
 
-- it is written in a separate clean session using only the pinned normative specification, Appendix B and fixture cases whose derivation status is `specification`;
+- its original v0.6 version was written in a separate clean session using only that pinned normative specification, Appendix B and fixture cases whose derivation status was `specification`;
 - its authoring workspace and context exclude the Rust source, Rust tests, Rust implementation notes, all `implementation`-status fixtures, Rust-derived expected outputs and prior differential reports;
 - it shares no protocol code, generated parser, fixture-producing code or algorithmic helper with Rust;
 - its provenance records the specification commit and the independent authoring constraint; and
 - the resulting code remains intentionally small and readable by a human reviewer.
 
 Before any provisional case is revealed, the Python model and its authoring record must be reviewed and frozen at a recorded source commit or content digest. Only then may `implementation`-status inputs be supplied to the differential harness. Their Rust-derived expected outputs remain outside the Python authoring context: the frozen model computes its own results before the harness compares them. Agreement may promote an unchanged case to `confirmed`; disagreement opens a specification or implementation review issue. Running provisional fixtures through a model that saw their expected outputs while it was being written is not independent confirmation.
+
+Adapting the reviewed model from v0.6 to the pinned v0.7 specification is a versioned maintenance pass, not a claim that v0.7 was independently authored from a blank workspace. Until that pass is reviewed and frozen, its authoring context may contain only the clean-room repository's own frozen source and records, the pinned v0.7 specification, and the unchanged `specification`-status Appendix B inputs. It must not receive Rust source, Rust tests, Rust-derived fixtures or outputs, implementation reports, or differential results. The authoring record must identify both specification revisions, explain every semantic change, and record the new reviewed revision or tag before v0.7 differential inputs are supplied.
 
 The Python model must independently implement enough of Sections 3 through 8 to derive DIDs, preserve and validate deterministic CBOR bytes, reconstruct the COSE `Sig_structure`, perform Followee-strict Ed25519 verification, classify verification results and select candidates. A library’s ordinary Ed25519 verifier is insufficient unless its behaviour is demonstrated to satisfy every Section 3.3 requirement or supplemented with explicit checks. Library documentation or successful rejection of one malformed signature is not evidence for the remaining rules: run the B.4 `S + L` envelope case and the adopted primitive edge-case vectors explicitly against the Python verifier.
 
@@ -674,7 +696,7 @@ Deliver:
 - formatting, linting and test CI;
 - `#![forbid(unsafe_code)]` at the crate root;
 - `cargo-audit` and `cargo-deny` configuration;
-- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; entries through the code-`7` symbolic rename and non-authoritative Absent/Error client rules must cite their introduction in specification v0.4 and retention in specification v0.6 at the pinned commit rather than remain open;
+- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; entries through the code-`7` symbolic rename and non-authoritative Absent/Error client rules must cite their introduction in specification v0.4 and retention in specification v0.7 at the pinned commit rather than remain open;
 - injected clock and randomness traits; and
 - documented developer commands.
 
@@ -692,7 +714,7 @@ Deliver:
 - exact COSE Sign1 profile;
 - key and descriptor handling;
 - DID parsing and derivation;
-- Contact Document and record schemas, including the registry-independent service-metadata grammars fixed by specification v0.6;
+- Contact Document and record schemas, including the registry-independent service-metadata grammars fixed by specification v0.6 and the URI and exact CBOR-label rules fixed by specification v0.7;
 - signing, verification, digesting and ordering;
 - the sole production strict-Ed25519 entry point and mechanical direct-call restriction; and
 - complete Appendix B tests.
@@ -710,9 +732,11 @@ Acceptance:
 - the B.5 RootRevoked wiring test delegates exactly once with label `5`'s exact revealed revocation public key, COSE `Sig_structure` and received signature;
 - the public B.4 `S + L` test uses the non-injectable production record-verification wrapper;
 - CI rejects direct underlying-library verification calls outside the audited strict wrapper;
-- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained in specification v0.6 at the pinned commit;
+- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained in specification v0.7 at the pinned commit;
 - B.8 fails specifically with `identityBindingMismatch` despite a valid attacker signature;
-- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or absolute URI, with no mutable registry lookup or normalization;
+- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or a URI satisfying specification v0.7 Section 7.2, with no mutable registry lookup or normalization;
+- every numeric core label is accepted only from the corresponding CBOR unsigned-integer key; Boolean `false` and `true` substitutions in Authority Descriptors and public-key objects fail with `schemaViolation`, including the correctly signed, descriptor-bound Appendix B.7 item 17 construction;
+- URI conformance tests accept scheme-bearing queries and fragments, reject every relative-reference form, and accept both lowercase and uppercase `IPvFuture` introducers through the production Contact Document path;
 - service collection tests enforce both the independent 64-entry cap and the aggregate member cap, including the effective maxima of 61 minimal Root services and 60 minimal RootRevoked services;
 - candidate selection takes an explicit target DID and remains permutation-independent over a mixed-identity candidate set, with every winner belonging to the target;
 - future-bound, stale-record, absolute RootRevoked-precedence, no-fallback and sticky-state-loss tests described in Section 11.1 pass;
@@ -726,9 +750,10 @@ Do not begin relay code before this milestone passes.
 
 Deliver:
 
-- the small Python model described in Section 11.4;
-- an authoring record showing it was produced in a separate session using only the pinned specification and `specification`-status fixtures, without access to Rust source or Rust-derived material;
+- the separately maintained Python model and preserved v0.6 freeze/review tags described in Section 11.4;
+- an authoring record showing the original model was produced in a separate session using only its pinned v0.6 specification and `specification`-status fixtures, without access to Rust source or Rust-derived material;
 - a recorded commit or content digest freezing the reviewed model before provisional fixtures are revealed;
+- a reviewed v0.7 maintenance revision produced without access to Rust or differential material and frozen before v0.7 differential comparison;
 - independent Appendix B reproduction;
 - a differential harness that supplies provisional inputs only after the freeze and does not feed their expected outputs into model authoring; and
 - curated and randomized differential cases with the comparison rules in Section 11.4.
@@ -738,6 +763,7 @@ Acceptance:
 - the allowed authoring inputs and excluded Rust-derived inputs are recorded and auditable;
 - Appendix B positive values are independently reproduced rather than imported from Rust output;
 - the model’s frozen revision predates its first access to any `implementation`-status fixture;
+- the v0.7 maintenance record identifies the v0.6 and v0.7 specification pins and the reviewed v0.7 model revision;
 - shared fixtures agree on acceptance or rejection, and every case marked `errorAssertion: exact` agrees on the specified symbolic error;
 - valid randomized shared operations agree on bytes and semantic results;
 - arbitrary malformed inputs agree on acceptance versus rejection;
@@ -745,7 +771,7 @@ Acceptance:
 - every disagreement is resolved against the specification and retained as a regression test; and
 - the model is small enough for direct human review and makes no claim to full Section 20.4 interoperability.
 
-The Python model may be commissioned before or after Rust Milestone 1, but its clean authoring session must not inspect Rust or provisional fixture material. Do not begin relay code until both Milestone 1 and Milestone 1.5 pass.
+The existing Python model was commissioned after Rust Milestone 1 but independently, under the restrictions above. Any future independently authored model must likewise avoid Rust and provisional fixture material during its clean authoring session. Do not begin relay code until both Milestone 1 and Milestone 1.5 pass against the same pinned specification.
 
 ### Milestone 2: authoring and inspection CLI
 
@@ -856,7 +882,7 @@ An AI coding agent working from this brief should:
 
 For the first coding session, the agent should perform Milestone 0 only, then present the scaffold and CI for review. It should not begin cryptographic or CBOR implementation in the same unreviewed pass.
 
-The Python model must be assigned through a separate clean session whose context contains the pinned protocol specification and `specification`-status fixtures only. It must not receive Rust source, tests, implementation notes, provisional fixtures, Rust-derived expected outputs or differential reports until the reviewed model is frozen at a recorded revision. Do not ask the Rust implementation agent to produce its own “independent” model after reading the production code; independence cannot be added as a comment after the fact.
+An independently authored Python model must be assigned through a separate clean session whose context contains its pinned protocol specification and `specification`-status fixtures only. It must not receive Rust source, tests, implementation notes, provisional fixtures, Rust-derived expected outputs or differential reports until the reviewed model is frozen at a recorded revision. Maintenance of the existing clean-room model follows the narrower v0.7 update rules in Section 11.4. Do not ask the Rust implementation agent to produce its own “independent” model after reading the production code; independence cannot be added as a comment after the fact.
 
 ## 15. Definition of v0.1 completion
 
