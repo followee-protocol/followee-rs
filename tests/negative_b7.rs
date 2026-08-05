@@ -541,12 +541,73 @@ fn rejects_relative_uri_in_service_endpoint() {
 }
 
 #[test]
-fn rejects_uri_with_fragment_per_rfc3986_absolute_uri() {
-    // "absolute URI under RFC 3986" is the absolute-URI production, which
-    // has no fragment.
-    let contact = r_map(&[(r_uint(2), r_tstr("https://example.com/a#frag"))]);
+fn sec_7_2_uri_production_accepts_queries_and_fragments() {
+    // v0.7: the RFC 3986 section 3 URI production permits optional query
+    // and fragment components in every URI-bearing position.
+    let avatar = r_map(&[(
+        r_uint(2),
+        r_tstr("https://example.com/profile?view=full#about"),
+    )]);
+    let envelope = seal(&body_with_contact(avatar), &root_seed());
+    assert!(
+        verify_alice(&envelope).is_ok(),
+        "avatar with query+fragment"
+    );
+
+    let aka = r_map(&[(r_uint(3), r_array(&[r_tstr("did:web:example.com#key-1")]))]);
+    let envelope = seal(&body_with_contact(aka), &root_seed());
+    assert!(
+        verify_alice(&envelope).is_ok(),
+        "alsoKnownAs DID URL fragment"
+    );
+
+    // Service endpoint, URI-form type, URI-form rel, and extension key.
+    let service = r_map(&[
+        (r_uint(0), r_tstr("s")),
+        (r_uint(1), r_tstr("https://example.com/types/x?v=1#frag")),
+        (r_uint(2), r_tstr("https://example.com/feed?page=1#top")),
+        (r_uint(6), r_tstr("https://example.com/rel#section")),
+    ]);
+    let contact = r_map(&[
+        (r_uint(4), r_array(&[service])),
+        (
+            r_uint(6),
+            r_map(&[(r_tstr("https://example.com/ext?x=1#f"), r_uint(1))]),
+        ),
+    ]);
     let envelope = seal(&body_with_contact(contact), &root_seed());
-    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+    assert!(
+        verify_alice(&envelope).is_ok(),
+        "endpoint, URI type, URI rel, and extension key with query+fragment"
+    );
+
+    // IPvFuture introducers: lowercase and uppercase both accepted.
+    for host in ["http://[v1.a]/x", "http://[V1.a]/x"] {
+        let contact = r_map(&[(r_uint(2), r_tstr(host))]);
+        let envelope = seal(&body_with_contact(contact), &root_seed());
+        assert!(verify_alice(&envelope).is_ok(), "IPvFuture {host}");
+    }
+}
+
+#[test]
+fn sec_7_2_rejects_every_relative_reference_form() {
+    // network-path, absolute-path, relative-path, query-only, fragment-only.
+    for bad in [
+        "//example.com/x",
+        "/profile",
+        "profile",
+        "?view=full",
+        "#about",
+        "",
+    ] {
+        let contact = r_map(&[(r_uint(2), r_tstr(bad))]);
+        let envelope = seal(&body_with_contact(contact), &root_seed());
+        assert_eq!(
+            verify_alice(&envelope),
+            Err(VerifyError::SchemaViolation),
+            "relative reference {bad:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -706,5 +767,144 @@ fn rejects_non_map_root_key_value_in_descriptor() {
     let mut entries = b4_raw_entries();
     entries[4].1 = descriptor;
     let envelope = seal(&r_map(&entries), &root_seed());
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+}
+
+// ---------------------------------------------------------------------------
+// Appendix B.7 item 17 (v0.7): CBOR simple values false/true substituted for
+// unsigned-integer labels 0/1 in Authority Descriptors and nested public-key
+// objects. Each complete case derives its target DID from the mutated
+// descriptor and is correctly signed by the descriptor's applicable key, so
+// exact schemaViolation demonstrates label-type enforcement rather than a
+// coincidental signature or binding failure.
+// ---------------------------------------------------------------------------
+
+fn r_bool(v: bool) -> Vec<u8> {
+    vec![if v { 0xf5 } else { 0xf4 }]
+}
+
+fn item17_case(descriptor: Vec<u8>) {
+    use followee::did::FolloweeDid;
+    // Internally consistent: body id derives from the mutated descriptor.
+    let did = FolloweeDid::from_descriptor_bytes(&descriptor);
+    let entries = vec![
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), r_tstr(did.as_str())),
+        (r_uint(2), r_uint(B4_TIMESTAMP_MS)),
+        (r_uint(3), r_uint(0)),
+        (r_uint(4), descriptor),
+        (r_uint(7), alice_contact_raw()),
+    ];
+    let payload = r_map(&entries);
+    let envelope = seal(&payload, &root_seed());
+
+    // Single-fault isolation: the signature is valid at the primitive level
+    // over the exact Sig_structure, and descriptor binding reproduces the
+    // target; only the label type is wrong.
+    let sig: [u8; 64] = envelope[envelope.len() - 64..].try_into().expect("64");
+    assert!(followee::crypto::verify_followee_ed25519(
+        &fx32("root_public_key"),
+        &followee::sig_structure(&payload),
+        &sig,
+    ));
+    assert_eq!(
+        verify_record(&did, &envelope).map(|_| ()),
+        Err(VerifyError::SchemaViolation),
+        "exact schemaViolation for Boolean label"
+    );
+}
+
+#[test]
+fn sec_b7_item17_descriptor_label_0_as_false() {
+    // {1: rootKey, 2: commitment, false: 1} — encoded-key order 01, 02, f4.
+    let descriptor = r_map(&[
+        (
+            r_uint(1),
+            r_map(&[
+                (r_uint(0), r_nint_mag(18)),
+                (r_uint(1), r_bstr(&fx_bytes("root_public_key"))),
+            ]),
+        ),
+        (r_uint(2), r_bstr(&fx_bytes("revocation_commitment"))),
+        (r_bool(false), r_uint(1)),
+    ]);
+    item17_case(descriptor);
+}
+
+#[test]
+fn sec_b7_item17_descriptor_label_1_as_true() {
+    // {0: 1, 2: commitment, true: rootKey} — encoded-key order 00, 02, f5.
+    let descriptor = r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(2), r_bstr(&fx_bytes("revocation_commitment"))),
+        (
+            r_bool(true),
+            r_map(&[
+                (r_uint(0), r_nint_mag(18)),
+                (r_uint(1), r_bstr(&fx_bytes("root_public_key"))),
+            ]),
+        ),
+    ]);
+    item17_case(descriptor);
+}
+
+#[test]
+fn sec_b7_item17_public_key_label_0_as_false() {
+    // Nested public-key object {1: key, false: -19}.
+    let bad_key = r_map(&[
+        (r_uint(1), r_bstr(&fx_bytes("root_public_key"))),
+        (r_bool(false), r_nint_mag(18)),
+    ]);
+    let descriptor = r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), bad_key),
+        (r_uint(2), r_bstr(&fx_bytes("revocation_commitment"))),
+    ]);
+    item17_case(descriptor);
+}
+
+#[test]
+fn sec_b7_item17_public_key_label_1_as_true() {
+    // Nested public-key object {0: -19, true: key}.
+    let bad_key = r_map(&[
+        (r_uint(0), r_nint_mag(18)),
+        (r_bool(true), r_bstr(&fx_bytes("root_public_key"))),
+    ]);
+    let descriptor = r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), bad_key),
+        (r_uint(2), r_bstr(&fx_bytes("revocation_commitment"))),
+    ]);
+    item17_case(descriptor);
+}
+
+#[test]
+fn boolean_labels_rejected_in_every_other_fixed_label_map() {
+    // Record body map: {false: 1} appended after label 8 position.
+    let mut entries = b4_raw_entries();
+    entries.push((r_bool(false), r_uint(1)));
+    let envelope = seal(&r_map(&entries), &root_seed());
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+
+    // Contact document map.
+    let contact = r_map(&[(r_bool(true), r_tstr("x"))]);
+    let envelope = seal(&body_with_contact(contact), &root_seed());
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+
+    // Service map.
+    let service = r_map(&[
+        (r_uint(0), r_tstr("s")),
+        (r_uint(1), r_tstr("Website")),
+        (r_uint(2), r_tstr("https://example.com/")),
+        (r_bool(true), r_tstr("x")),
+    ]);
+    let contact = r_map(&[(r_uint(4), r_array(&[service]))]);
+    let envelope = seal(&body_with_contact(contact), &root_seed());
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+
+    // Migration map.
+    let migration = r_map(&[(r_bool(false), r_tstr(&fx_str("attacker_did")))]);
+    let contact = r_map(&[(r_uint(5), migration)]);
+    let envelope = seal(&body_with_contact(contact), &root_seed());
     assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
 }

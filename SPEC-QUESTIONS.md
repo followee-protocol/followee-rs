@@ -3,7 +3,7 @@
 Ambiguities identified in the normative specification
 (`followee-protocol/followee`), tracked against the pinned commit in
 IMPLEMENTATION.md section 2 (currently
-`44c68660f0c0a1e3504c0f9794b8c51058da6f18`, specification v0.6). Per
+`abc9a55d90f1026e6509207abda73e5dc6d14241`, specification v0.7). Per
 IMPLEMENTATION.md section 2, questions are resolved in the protocol repository
 — never silently in this implementation — and no milestone may pass while an
 open question affects code delivered by that milestone. Resolving a question
@@ -11,7 +11,7 @@ that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
 **All recorded questions are resolved**, and every resolution remains in
-force in specification v0.6 at the pinned commit. Each resolved entry cites
+force in specification v0.7 at the pinned commit. Each resolved entry cites
 the amending version and records the test obligation the resolution creates.
 
 ---
@@ -191,3 +191,36 @@ provisional validators.
 `contact::tests` (`sec_7_3_service_token_shape_helpers`), at-limit boundary
 twins updated to grammar-valid values, and reachability through
 `ServiceEntry::validate`.
+
+## SQ-10 — v0.7 URI production and exact CBOR label typing
+
+**Status:** resolved (spec v0.7, commit `abc9a55`) · **Affected:** Milestone 1 · **Spec:** sections 7.2, 20.1; Appendix B.7 item 17
+
+Recorded for bookkeeping: the v0.7 amendment (driven by clean-room
+differential review) changed two Milestone 1 obligations.
+
+1. **URI production.** Section 7.2 now requires the RFC 3986 section 3 `URI`
+   production — scheme required, optional query and fragment permitted —
+   replacing the fragment-excluding `absolute-URI` reading. Every
+   `relative-ref` form remains malformed, and both lowercase and uppercase
+   `IPvFuture` introducers are accepted (ABNF string literals are
+   case-insensitive under RFC 5234). Implemented by switching the single URI
+   validator to the `URI` type (`is_uri` in `src/contact.rs`) and exercising
+   it through every URI-bearing position: avatar, `alsoKnownAs`, service
+   endpoint, URI-form service type, URI-form `rel`, and extension keys.
+
+2. **Exact CBOR label typing.** Appendix B.7 item 17 adds conformance cases
+   substituting CBOR `false`/`true` for unsigned-integer labels `0`/`1` in
+   Authority Descriptors and nested public-key objects, including a complete
+   internally consistent, descriptor-bound, correctly signed construction
+   failing exactly with `schemaViolation`. This crate's parsers always
+   required `MAJOR_UINT` keys (Rust's CBOR head typing cannot alias Booleans
+   to integers), so no parser change was needed; the item 17 cases and a
+   Boolean-label sweep over every other fixed-label map now prove it through
+   the production record path.
+
+**Test obligations (Milestone 1, done):**
+`sec_7_2_uri_production_accepts_queries_and_fragments`,
+`sec_7_2_rejects_every_relative_reference_form`,
+`sec_b7_item17_descriptor_label_0_as_false` (+ three sibling cases),
+`boolean_labels_rejected_in_every_other_fixed_label_map`.

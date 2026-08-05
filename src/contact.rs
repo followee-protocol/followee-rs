@@ -33,15 +33,15 @@ pub struct ContactDocument {
     pub display_name: Option<String>,
     /// Short public description (≤ 2,048 UTF-8 bytes).
     pub summary: Option<String>,
-    /// Absolute URI of an avatar image.
+    /// URI of an avatar image (section 7.2 URI production).
     pub avatar: Option<String>,
-    /// Claimed handles and alternate identifiers, as absolute URIs.
+    /// Claimed handles and alternate identifiers, as section 7.2 URIs.
     pub also_known_as: Vec<String>,
     /// Ordered public service endpoints; array order is presentation order.
     pub services: Vec<ServiceEntry>,
     /// Optional reciprocal migration claims.
     pub migration: Option<Migration>,
-    /// Namespaced contact extensions keyed by absolute URI.
+    /// Namespaced contact extensions keyed by section 7.2 URIs.
     pub extensions: ExtensionMap,
 }
 
@@ -50,9 +50,9 @@ pub struct ContactDocument {
 pub struct ServiceEntry {
     /// Unique local token: 1–256 ASCII `unreserved` characters.
     pub id: String,
-    /// Initial type token or absolute URI.
+    /// Initial type token or section 7.2 URI.
     pub service_type: String,
-    /// Absolute URI of the service.
+    /// URI of the service (section 7.2 URI production).
     pub endpoint: String,
     /// Optional ASCII media type (≤ 256 bytes).
     pub media_type: Option<String>,
@@ -60,7 +60,7 @@ pub struct ServiceEntry {
     pub label: Option<String>,
     /// Optional BCP 47 language tag (≤ 64 ASCII bytes).
     pub language: Option<String>,
-    /// Optional link-relation token or absolute URI (≤ 256 bytes).
+    /// Optional link-relation token or section 7.2 URI (≤ 256 bytes).
     pub rel: Option<String>,
 }
 
@@ -75,7 +75,7 @@ pub struct Migration {
     pub successor: Option<FolloweeDid>,
 }
 
-/// Extension map keyed by absolute-URI strings.
+/// Extension map keyed by URI strings (section 7.2 URI production).
 pub type ExtensionMap = BTreeMap<String, ExtensionValue>;
 
 /// A restricted extension value (specification section 5.6 / Appendix A).
@@ -110,12 +110,17 @@ pub enum ExtensionKey {
     Text(String),
 }
 
-fn is_absolute_uri(s: &str) -> bool {
-    iri_string::types::UriAbsoluteStr::new(s).is_ok()
+/// Specification section 7.2 (v0.7): the RFC 3986 section 3 `URI`
+/// production — scheme required, optional query and fragment permitted,
+/// every `relative-ref` form rejected. Uppercase and lowercase `IPvFuture`
+/// introducers are both accepted (ABNF string literals are case-insensitive).
+/// No general URI canonicalization is performed.
+fn is_uri(s: &str) -> bool {
+    iri_string::types::UriStr::new(s).is_ok()
 }
 
 fn check_uri(s: &str, max_bytes: usize) -> Result<(), VerifyError> {
-    if s.len() > max_bytes || !is_absolute_uri(s) {
+    if s.len() > max_bytes || !is_uri(s) {
         return Err(VerifyError::SchemaViolation);
     }
     Ok(())
@@ -397,7 +402,7 @@ impl ServiceEntry {
             return Err(VerifyError::SchemaViolation);
         }
         let type_ok = SERVICE_TYPE_TOKENS.contains(&self.service_type.as_str())
-            || (self.service_type.len() <= MAX_URI_BYTES && is_absolute_uri(&self.service_type));
+            || (self.service_type.len() <= MAX_URI_BYTES && is_uri(&self.service_type));
         if !type_ok {
             return Err(VerifyError::SchemaViolation);
         }
@@ -418,8 +423,7 @@ impl ServiceEntry {
             return Err(VerifyError::SchemaViolation);
         }
         if let Some(rel) = &self.rel
-            && (rel.len() > MAX_SERVICE_TOKEN_BYTES
-                || !(is_relation_token(rel) || is_absolute_uri(rel)))
+            && (rel.len() > MAX_SERVICE_TOKEN_BYTES || !(is_relation_token(rel) || is_uri(rel)))
         {
             return Err(VerifyError::SchemaViolation);
         }
@@ -479,7 +483,7 @@ impl Migration {
 
 fn validate_extension_map(map: &ExtensionMap) -> Result<(), VerifyError> {
     for (uri, value) in map {
-        if uri.len() > MAX_EXTENSION_KEY_BYTES || !is_absolute_uri(uri) {
+        if uri.len() > MAX_EXTENSION_KEY_BYTES || !is_uri(uri) {
             return Err(VerifyError::SchemaViolation);
         }
         validate_extension_value(value)?;

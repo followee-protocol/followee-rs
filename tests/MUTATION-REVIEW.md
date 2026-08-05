@@ -66,3 +66,10 @@ above. No surviving mutant weakens a normative or security-sensitive branch.
 
 The raw `mutants.out/` report is untracked (regenerable) and retained
 locally as review evidence.
+
+**v0.7 re-pin addendum:** after the section 7.2 URI-production change and the
+Appendix B.7 item 17 additions, a scoped sweep over the changed parser file
+(`src/contact.rs`) reported 239 mutants: 226 caught, 10 unviable, 3 missed —
+exactly the three survivors already explained above (the `is_language_tag`
+entry-guard equivalence and the two unobservable media-type length-cap
+boundary mutants). No new survivor was introduced by the v0.7 changes.

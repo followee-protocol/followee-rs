@@ -2,8 +2,8 @@
   "_provenance": {
     "description": "Construction provenance for the executable Appendix B.7 negative conformance cases in tests/negative_b7.rs and tests/conformance.rs",
     "derivation_status": "implementation",
-    "spec_version": "v0.6",
-    "pinned_commit": "44c68660f0c0a1e3504c0f9794b8c51058da6f18",
+    "spec_version": "v0.7",
+    "pinned_commit": "abc9a55d90f1026e6509207abda73e5dc6d14241",
     "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14; the identityBindingMismatch symbol is normative as of specification v0.4). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations."
   },
   "cases": [
@@ -375,6 +375,67 @@
       "expected": {
         "accepted": false,
         "errorAssertion": "unspecified"
+      }
+    },
+    {
+      "id": "b7-17a-descriptor-label0-false",
+      "baseVector": "B.4",
+      "mutation": "descriptor label 0 replaced by CBOR false; body id and target derived from the mutated descriptor; deterministic key order preserved",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "schemaViolation"
+      },
+      "note": "internally consistent, descriptor-bound, correctly signed per v0.7 item 17"
+    },
+    {
+      "id": "b7-17b-descriptor-label1-true",
+      "baseVector": "B.4",
+      "mutation": "descriptor label 1 replaced by CBOR true; same complete construction",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "schemaViolation"
+      }
+    },
+    {
+      "id": "b7-17c-public-key-label0-false",
+      "baseVector": "B.4",
+      "mutation": "nested public-key label 0 replaced by CBOR false; same complete construction",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "schemaViolation"
+      }
+    },
+    {
+      "id": "b7-17d-public-key-label1-true",
+      "baseVector": "B.4",
+      "mutation": "nested public-key label 1 replaced by CBOR true; same complete construction",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "schemaViolation"
       }
     }
   ]
