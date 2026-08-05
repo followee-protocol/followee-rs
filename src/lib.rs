@@ -34,14 +34,52 @@ pub mod verify;
 
 pub use cose::sig_structure;
 
+/// Validates that `bytes` is exactly one deterministic-profile CBOR item
+/// (specification section 6.1) within the requested nesting-depth and
+/// total-member limits, with no trailing bytes.
+///
+/// This is structural validation only: it checks the deterministic encoding
+/// profile (definite lengths, minimal encodings, bytewise map-key ordering,
+/// no duplicates, no tags, floats, `undefined`, or reserved simples, valid
+/// UTF-8) under explicit limits. It performs **no** Followee record-schema
+/// check; use [`verify::verify_record`] for complete Identity Record
+/// verification.
+///
+/// Classification follows the section 15.3 vocabulary: malformed, truncated,
+/// or unsupported structure is [`error::VerifyError::InvalidCbor`];
+/// non-minimal or indefinite encodings and duplicate or misordered map keys
+/// are [`error::VerifyError::NonDeterministicCbor`]; exceeding a requested
+/// limit is [`error::VerifyError::SchemaViolation`].
+///
+/// Followee v1 defines no context requiring limits beyond
+/// [`limits::MAX_BODY_DEPTH`] and [`limits::MAX_BODY_MEMBERS`]. Requested
+/// limits above those maxima are rejected as
+/// [`error::VerifyError::SchemaViolation`] before any parsing, which also
+/// bounds the validator's recursion and work regardless of caller input.
+///
+/// # Errors
+///
+/// Returns the [`error::VerifyError`] classification described above.
+pub fn validate_cbor(
+    bytes: &[u8],
+    max_depth: u32,
+    max_members: u32,
+) -> Result<(), error::VerifyError> {
+    if max_depth > limits::MAX_BODY_DEPTH || max_members > limits::MAX_BODY_MEMBERS {
+        return Err(error::VerifyError::SchemaViolation);
+    }
+    cbor::validate(bytes, max_depth, max_members).map_err(error::VerifyError::from)
+}
+
 /// Entry points for fuzz targets only. Not part of the public API surface;
 /// stability is not guaranteed.
 #[doc(hidden)]
 pub mod fuzzing {
     use crate::limits::{MAX_BODY_DEPTH, MAX_BODY_MEMBERS};
 
-    /// Runs the strict deterministic CBOR validator over arbitrary bytes.
+    /// Runs the strict deterministic CBOR validator over arbitrary bytes,
+    /// routed through the public wrapper so one structural gate exists.
     pub fn validate_cbor(bytes: &[u8]) -> bool {
-        crate::cbor::validate(bytes, MAX_BODY_DEPTH, MAX_BODY_MEMBERS).is_ok()
+        crate::validate_cbor(bytes, MAX_BODY_DEPTH, MAX_BODY_MEMBERS).is_ok()
     }
 }

@@ -48,7 +48,6 @@ non-protocol scaffolding.
 | `src/cose.rs` `parse_envelope` protected-header/`payload` condition mutants (`\|\|`→`&&`, `==`→`!=` at the null-payload special case) | Equivalent classification: with the mutation, the affected input falls through to an adjacent check that rejects with the same `SchemaViolation`. The null-payload arm exists for clarity of the detached-payload rule, not for a distinct error. |
 | `src/cose.rs` `classify_protected` condition mutants | Equivalent classification: `classify_protected` only refines an already-failed protected-header comparison into `UnsupportedSuite` versus `SchemaViolation`; the mutated conditions reroute malformed headers between internal branches that both end in `SchemaViolation`. The `-8` → `UnsupportedSuite` refinement itself is pinned by the item 3 test. |
 | `src/record.rs` `parse_descriptor`/`parse_public_key` head-check `\|\|` → `&&` | Equivalent-outcome where surviving: a non-map or wrong-arity value either fails the mutated combined check anyway or misparses into a guaranteed `SchemaViolation`/`InvalidCbor` from the following reads; the distinct-outcome shapes are covered by the non-map descriptor, non-map root-key, and wrong-arity tests. |
-
 | `src/contact.rs` `is_language_tag` entry guard `\|\|` → `&&` | Equivalent: an empty tag fails downstream via the empty-segment check, and every non-ASCII byte fails every subtag character class, so the fast-path guard has no observable effect. |
 | `src/contact.rs` `ServiceEntry::validate` media-type length `>` → `>=`/`==` | Unobservable boundary: the v0.6 RFC 6838 grammar caps a media type at 255 bytes (127 + `/` + 127), strictly inside the 256-byte field cap, so no grammar-valid value can reach the length boundary. |
 
@@ -66,6 +65,14 @@ above. No surviving mutant weakens a normative or security-sensitive branch.
 
 The raw `mutants.out/` report is untracked (regenerable) and retained
 locally as review evidence.
+
+**Conformance-API addendum (public `validate_cbor` wrapper):** a scoped
+sweep over `src/lib.rs` and `src/cbor.rs` after adding the public wrapper
+reported 132 mutants: 124 caught, 1 unviable, 7 missed — all seven are the
+long-documented `cbor.rs` equivalents above (the disjoint-operand `|` → `^`
+family and the major-7 fall-through arm). The wrapper itself (`src/lib.rs`)
+has zero surviving mutants; its limit-cap guard and delegation are pinned by
+the external `validate_cbor_api` tests.
 
 **Review-fix addendum (post-`d23d660` independent review):** after wiring
 `validate_extension_map` into `RecordBody::validate` and adding the Boolean

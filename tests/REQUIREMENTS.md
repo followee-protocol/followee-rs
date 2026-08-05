@@ -46,6 +46,7 @@ DID-document-projection sections arrive with their milestones.
 | §20.4 (partial) | Identical structured input → identical bytes across runs | `conformance::sec_20_4_structured_input_determinism_across_runs`, `properties::sec_7_2_…` |
 | IMPL §6.2 | Sole strict entry point; wiring delegation with exact key/message/signature; mechanical call restriction | `verify::wiring_tests::*`, `lint_guard::*`, `clippy.toml` + CI `-D warnings` |
 | IMPL §7.3 | Checked arithmetic; injected clock/randomness | `clock::tests::*`, `random::tests::*`, crate-wide `arithmetic_side_effects = "deny"` |
+| Conformance API | Public `followee::validate_cbor` structural gate: §6.1 profile under explicit limits, §15.3 classifications, limits capped at the Followee maxima, single gate shared with fuzzing and the record path | `validate_cbor_api::*` (nine external tests incl. boundary, zero-limit, over-maxima, and record-path parity cases) |
 
 Known intentional gaps at this milestone: relay/resolver behaviour (§§10–14),
 DID Document projection (§9.6), WebFinger (§10), and the remote signer (§18)

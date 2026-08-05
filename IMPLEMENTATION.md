@@ -555,6 +555,8 @@ Differential testing rules are:
 - arbitrary malformed fuzz inputs must produce identical accept/reject results; and
 - exact error equality for an input violating several independent rules is required only where the specification defines precedence, because Section 8.1 permits cheap independent checks to be reordered.
 
+Implementations used by the neutral differential harness must expose narrow public entry points to the same production primitives used by complete record processing, including strict Ed25519 verification, deterministic-CBOR validation with explicit bounded limits, timestamp generation, and candidate selection. Harness adapters must not call hidden fuzzing interfaces, test-only helpers, or recreate missing protocol behaviour. If a required production entry point is absent, the implementation must add and review that entry point before the differential operation is claimed.
+
 Any disagreement is resolved from the normative specification, not by majority vote between implementations. The Python model is independent core evidence but does not alone satisfy Section 20.4, which also requires the broader authoring, selection and HTTP/CBOR exchange behaviours stated there.
 
 ### 11.5 Fuzzing
