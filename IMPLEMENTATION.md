@@ -18,8 +18,9 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned commit: `abc9a55d90f1026e6509207abda73e5dc6d14241`
-- specification draft: `v0.7`
+- pinned commit: `610f9a1e78d860e8bd685ef1435a53a16f1221ec`
+- specification SHA-256: `474f0b3880e838a5232890c3e2edc183c341fd25e28d7db0066ad109aa43113b`
+- specification draft: `v0.8`
 - protocol version: `1`
 - DID method: `did:flw`
 
@@ -29,7 +30,7 @@ The implementation MUST NOT silently invent behaviour when the specification is 
 
 No milestone may pass while `SPEC-QUESTIONS.md` contains an unresolved question that affects code in that milestone. If resolving a question amends the normative specification, update the pinned commit in this section, record the change in the implementation repository, and rerun the complete conformance and differential suite. A previous green result against another commit is not inherited automatically.
 
-The v0.7 amendment preserves the Appendix B positive bytes but changes normative URI acceptance and adds exact CBOR label-type conformance cases. The previous Milestone 1 result against v0.6 therefore remains useful evidence but is not a v0.7 result. Before beginning Milestone 2, the Rust core and the independently maintained Python model must both be updated against this pin, their complete suites rerun, and the affected shared cases compared under Sections 11.4 and 12.
+The v0.8 amendment preserves the earlier Alice positive vectors but changes normative CBOR error classification, adds Bob and fault-isolated basic-validity vectors, and fixes relay batch-isolation and synchronization-progress rules. A previous green result against v0.7 remains useful evidence but is not a v0.8 result. Rust and the independently maintained Python model must be updated from the pinned specification in separate maintenance passes; the Python pass must be reviewed and frozen before it receives Rust changes, outputs, fixtures or differential results. The neutral harness must then rerun the complete corpus rather than only new cases. Its report must preserve the v0.7 fixture-bundle digest and baseline metrics and separately count acceptance/rejection disagreements, permitted symbolic differences on unspecified multi-fault inputs, and genuine specification ambiguities.
 
 ## 3. Implementation status and naming
 
@@ -276,7 +277,7 @@ The creation command should permit the revocation key to be written directly to 
 
 The CLI may accept a friendly JSON Contact Document using field names rather than CBOR labels. This JSON is an implementation convenience and is not a Followee wire format.
 
-It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars introduced in specification v0.6 Section 7.3 and retained by v0.7; authoring and verification paths must apply the same grammar. Every URI-valued field MUST use the v0.7 Section 7.2 `URI` production, including optional query and fragment components, rather than the fragment-excluding RFC 3986 `absolute-URI` production.
+It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars introduced in specification v0.6 Section 7.3 and retained by v0.8; authoring and verification paths must apply the same grammar. Every URI-valued field MUST use the pinned v0.8 Section 7.2 `URI` production, including optional query and fragment components, rather than the fragment-excluding RFC 3986 `absolute-URI` production.
 
 ## 8. CLI surface
 
@@ -408,17 +409,19 @@ Testing is a primary deliverable, not cleanup after implementation.
 
 ### 11.1 Normative conformance tests
 
-The implementation MUST reproduce Appendix B byte-for-byte, including:
+The implementation and neutral fixture tooling MUST reproduce every computable Appendix B value byte-for-byte. Sections B.2 through B.10 are protocol-core obligations for Milestone 1; B.11 request and response bytes and digests are reproduced immediately, while their HTTP, client and synchronization behaviours become acceptance gates in Milestones 3 and 4. Reproduction includes:
 
-- both public keys from the published seeds;
-- revocation public-key CBOR and commitment;
-- Authority Descriptor bytes, digest, multihash and DID;
+- all public keys from the published seeds;
+- revocation public-key CBOR and commitments;
+- Authority Descriptor bytes, digests, multihashes and DIDs;
 - root and RootRevoked body bytes and digests;
+- Bob's complete positive body and envelope;
 - exact protected headers;
 - exact `Sig_structure` bytes;
 - exact signatures and complete envelopes;
-- equal-time ordering; and
-- the validly signed descriptor-substitution rejection.
+- equal-time ordering;
+- the validly signed descriptor-substitution rejection; and
+- every B.10 and B.11 stated length and SHA-256 digest.
 
 Every mutation in Appendix B.7 must be represented as an executable negative test. The test should assert the intended symbolic error where the verification algorithm defines one, not merely assert generic failure.
 
@@ -446,6 +449,9 @@ Use the following construction plan:
 | 15 | Set `validUntil_ms < timestamp_ms` and re-sign the mutated payload with the legitimate applicable key. |
 | 16 | Expand into boundary fixtures for each relevant aggregate hard limit. Re-sign whenever signed material changes, and construct each case so an earlier unrelated cap—especially the 16 KiB envelope limit—does not mask the intended failure. |
 | 17 | Replace unsigned-integer label `0` or `1` with the CBOR simple value `false` or `true` in the Authority Descriptor and nested public-key object. Cover both Boolean values at both schema levels. At least one complete case must derive its target DID from the Boolean-labelled descriptor and carry a valid signature from that descriptor's applicable key, isolating exact `schemaViolation` rather than signature or identity-binding failure. |
+| 18 | Use the four exact Appendix B.10 invalid-UTF-8 bodies, each re-signed by Alice's legitimate root key. Preserve the invalid received text bytes without decoding, replacement or normalization. Each is a single-fault case with exact error `invalidCbor`; a stale signature would turn it into a different test. |
+
+Appendix B.9 is a second complete positive identity, not merely seed material. Reproduce Bob's keys, commitment, descriptor, DID, body, `Sig_structure`, digest, signature and envelope exactly, and use Alice and Bob together to test cross-DID state isolation. Appendix B.10's adjacent-duplicate map vector and four invalid-UTF-8 vectors are normative `invalidCbor` cases. The duplicate must remain weakly key-sorted so duplication is its only fault; all five exact raw bodies and signatures must be consumed from specification-derived fixtures rather than recreated as implementation expectations.
 
 ##### Item 14 strict-Ed25519 cases
 
@@ -466,7 +472,7 @@ For every external cryptographic vector, record its stable source, vector identi
 
 Primitive fixtures must invoke the same production `crypto::verify_followee_ed25519` entry point used by record verification. They must not call a test-only strict helper or bypass wrapper. In addition, both record-path wiring tests from Section 6.2 must capture and compare the authority-specific public key, full message bytes and signature passed by their complete parsed envelopes. Together with the public-path B.4 `S + L` case and the mechanical direct-call restriction, this establishes that primitive conformance is connected to both record-verification authority branches rather than merely present somewhere in the codebase.
 
-Specification v0.4 resolved the former Appendix B.7 item 1 and item 2 ambiguities with unambiguous constructions and expected errors, and v0.7 retains those resolutions while adding item 17. A fixture is `specification`-status only when it follows the applicable normative construction exactly; merely citing the appendix does not promote independently chosen bytes or a multi-fault mutation.
+Specification v0.4 resolved the former Appendix B.7 item 1 and item 2 ambiguities with unambiguous constructions and expected errors. Specification v0.7 added item 17, and v0.8 retains those cases while adding item 18 and the fault-isolated B.10 basic-validity vectors. A fixture is `specification`-status only when it follows the applicable normative construction exactly; merely citing the appendix does not promote independently chosen bytes or a multi-fault mutation.
 
 Appendix B does not by itself cover every security-bearing branch in Sections 5 and 8. Milestone 1 therefore also requires locally authored, explicitly provisional tests for:
 
@@ -479,7 +485,7 @@ Appendix B does not by itself cover every security-bearing branch in Sections 5 
 - absence of any “last good Root” fallback; and
 - Section 8.5 behaviour after sticky state is deliberately discarded, distinguished from behaviour while it is retained.
 
-Specification v0.7 Section 20.1 additionally requires URI-profile cases that:
+Specification v0.8 Section 20.1 retains the URI-profile cases introduced in v0.7, which:
 
 - accept scheme-bearing URIs with optional queries and fragments, including `https://example.com/profile?view=full#about` and `did:web:example.com#key-1`;
 - reject network-path, absolute-path, relative-path, query-only and fragment-only references;
@@ -524,15 +530,19 @@ That model is useful for catching state-machine implementation mistakes but is n
 
 Maintain the small, deliberately direct Python implementation of Sections 3 through 8 in the separate public repository <https://github.com/followee-protocol/followee-python-cleanroom>, under that repository's `tools/python-model/` path. Its purpose is to detect comprehension errors shared by the Rust production code and its same-language test model. It MUST NOT be copied into this repository or made dependent on the Rust crate.
 
-The independently authored v0.6 baseline is preserved as follows:
+The independently authored baseline and reviewed maintenance lineage are preserved as follows:
 
 | Artefact | Revision |
 | --- | --- |
 | Approved-input commit | `70b393fa15d7fa550b1864ff28a86a8a20726561` |
 | Original independently authored freeze | `7ca1f623453065deefd1e6cfdf15e135d523dd7e` (`cleanroom-v0.6-freeze`) |
 | Post-freeze reviewed correction | `70e4a6caa8720f1dfbb3b183a5d305fca0cf3e57` (`cleanroom-v0.6-review1`) |
+| v0.7 approved-input maintenance commit | `6b944b952d1daec6840deae7e07f304f5349637d` |
+| Reviewed v0.7 maintenance freeze | `a39138dae8072c7b89dc922bcfe6f5717312c6e6` (`cleanroom-v0.7-maintenance-freeze`) |
 
 The reviewed correction rejects Boolean CBOR keys masquerading as integer labels and accepts uppercase as well as lowercase `IPvFuture` introducers. Its parent is the original freeze, its authoring record states that no excluded Rust or provisional material was revealed, and its public tag passes the complete 160-test clean-room suite. The original freeze tag remains immutable evidence of the model as first authored; the reviewed tag does not replace or rewrite it.
+
+The v0.7 maintenance freeze independently applied the RFC 3986 `URI` production and exact CBOR label typing from the v0.7 specification, preserved the unchanged Appendix B positive bytes, and passed its complete 173-test suite before differential material was exposed. It is the starting implementation revision for the v0.8 clean-room maintenance pass.
 
 Independence requirements:
 
@@ -544,7 +554,9 @@ Independence requirements:
 
 Before any provisional case is revealed, the Python model and its authoring record must be reviewed and frozen at a recorded source commit or content digest. Only then may `implementation`-status inputs be supplied to the differential harness. Their Rust-derived expected outputs remain outside the Python authoring context: the frozen model computes its own results before the harness compares them. Agreement may promote an unchanged case to `confirmed`; disagreement opens a specification or implementation review issue. Running provisional fixtures through a model that saw their expected outputs while it was being written is not independent confirmation.
 
-Adapting the reviewed model from v0.6 to the pinned v0.7 specification is a versioned maintenance pass, not a claim that v0.7 was independently authored from a blank workspace. Until that pass is reviewed and frozen, its authoring context may contain only the clean-room repository's own frozen source and records, the pinned v0.7 specification, and the unchanged `specification`-status Appendix B inputs. It must not receive Rust source, Rust tests, Rust-derived fixtures or outputs, implementation reports, or differential results. The authoring record must identify both specification revisions, explain every semantic change, and record the new reviewed revision or tag before v0.7 differential inputs are supplied.
+Adapting the reviewed v0.7 model at `a39138dae8072c7b89dc922bcfe6f5717312c6e6` to the pinned v0.8 specification is a versioned maintenance pass, not a claim that v0.8 was independently authored from a blank workspace. Until that pass is reviewed and frozen, its authoring context may contain only the clean-room repository's own frozen source, records and Git history; the exact v0.7 specification at commit `abc9a55d90f1026e6509207abda73e5dc6d14241` and SHA-256 `2b264823ba68d9a7d69ce68de5c1408ac8a3d54ff6d726ab89ee2baa2707c81f`; the exact v0.8 specification at commit `610f9a1e78d860e8bd685ef1435a53a16f1221ec` and SHA-256 `474f0b3880e838a5232890c3e2edc183c341fd25e28d7db0066ad109aa43113b`; and v0.8 `specification`-status inputs derived solely from the v0.8 document. The maintenance session must derive the semantic delta by comparing those two pinned specifications itself. It MUST NOT receive a prose summary of the changes, a list of affected sections, the amendment rationale, the implementation brief, the whitepaper, protocol-review discussion, Rust source or changes, Rust tests, Rust-derived fixtures or outputs, implementation reports, conformance-harness reports, v0.7 baseline metrics, or differential results. The authoring record must identify both specification pins and digests, independently enumerate and explain every semantic change as an output of the maintenance pass rather than from a supplied checklist, confirm that excluded material remained unavailable, and record the new reviewed revision or tag before any v0.8 Rust-derived or differential input is supplied.
+
+The Python decoder MUST NOT materialize an untrusted CBOR map directly into a native `dict` before duplicate-key, key-type and deterministic-encoding validation. It must preserve every map entry and distinguish keys by CBOR generic-data-model type as well as value: unsigned integer `0` and simple value `false` are distinct even though Python compares and hashes them equally. Comparing received encoded key bytes is equivalent only after deterministic encoding has been established; before then, `00` and non-minimal `18 00` are different encodings of the same unsigned-integer key. Tests must cover a map containing both integer `0` and Boolean `false`, identical duplicate keys, and differently encoded equivalent keys. Appendix B.7 item 17's eventual schema rejection does not by itself prove that the decoder preserved every entry or classified duplicate keys correctly.
 
 The Python model must independently implement enough of Sections 3 through 8 to derive DIDs, preserve and validate deterministic CBOR bytes, reconstruct the COSE `Sig_structure`, perform Followee-strict Ed25519 verification, classify verification results and select candidates. A library’s ordinary Ed25519 verifier is insufficient unless its behaviour is demonstrated to satisfy every Section 3.3 requirement or supplemented with explicit checks. Library documentation or successful rejection of one malformed signature is not evidence for the remaining rules: run the B.4 `S + L` envelope case and the adopted primitive edge-case vectors explicitly against the Python verifier.
 
@@ -556,6 +568,8 @@ Differential testing rules are:
 - exact error equality for an input violating several independent rules is required only where the specification defines precedence, because Section 8.1 permits cheap independent checks to be reordered.
 
 Implementations used by the neutral differential harness must expose narrow public entry points to the same production primitives used by complete record processing, including strict Ed25519 verification, deterministic-CBOR validation with explicit bounded limits, timestamp generation, and candidate selection. Harness adapters must not call hidden fuzzing interfaces, test-only helpers, or recreate missing protocol behaviour. If a required production entry point is absent, the implementation must add and review that entry point before the differential operation is claimed.
+
+Harness adapters are framing and transport glue, not protocol interpreters. An adapter MUST report exactly the success value or symbolic error classification returned by the implementation's reviewed production entry point. It MUST NOT map, normalize, infer or default a protocol error symbol, and MUST NOT catch a broad exception type in order to synthesize one. A missing classification or unexpected implementation exception is an adapter or harness infrastructure failure, never a Followee protocol result. If an implementation cannot expose the exact classification through a production entry point, that entry point must be added and reviewed before comparison. Adapter source and tests are part of every applicable milestone review; their tests must demonstrate transparent propagation of every exercised classification and distinguish unexpected exceptions from protocol rejections.
 
 Any disagreement is resolved from the normative specification, not by majority vote between implementations. The Python model is independent core evidence but does not alone satisfy Section 20.4, which also requires the broader authoring, selection and HTTP/CBOR exchange behaviours stated there.
 
@@ -583,6 +597,9 @@ The eventual integration suite must demonstrate:
 
 - publication and exact-byte resolution;
 - multiple DIDs in aligned batches;
+- malformed outer request versus malformed per-DID item HTTP classification;
+- duplicate requested DIDs and exact request/response cardinality;
+- opaque Full candidate isolation within otherwise valid resolve and `changes` wrappers;
 - response-size splitting behaviour;
 - two relays learning updates through `v1/changes`;
 - three updates coalescing into one current tuple;
@@ -591,6 +608,8 @@ The eventual integration suite must demonstrate:
 - reference cycles and unreachable endpoints;
 - cursor reset, including the exact two-field `ResetRequired` response followed by bounded null-cursor enumeration;
 - all `changes` status-dependent required and forbidden field combinations, including rejection of every label `2` through `6` on status `1`;
+- rejection of an over-`itemLimit` `changes` response without entry processing or cursor advancement;
+- cursor advancement past individually rejected or locally premature candidates in an accepted response;
 - a stored Full record becoming premature after an injected backwards clock correction, producing Error(`premature`) without a state or update-number change;
 - one relay returning Absent and another Error(`premature`) before a further selected relay returns a valid Full candidate, with resolution continuing and the candidate classified only by the client's injected clock;
 - Absent and Error results leaving cached identity and sticky authority state unchanged;
@@ -698,7 +717,7 @@ Deliver:
 - formatting, linting and test CI;
 - `#![forbid(unsafe_code)]` at the crate root;
 - `cargo-audit` and `cargo-deny` configuration;
-- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; entries through the code-`7` symbolic rename and non-authoritative Absent/Error client rules must cite their introduction in specification v0.4 and retention in specification v0.7 at the pinned commit rather than remain open;
+- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; entries through the CBOR basic-validity taxonomy, byte-string opacity, relay batch isolation and cursor-progress rules must cite their resolution in specification v0.8 at the pinned commit rather than remain open;
 - injected clock and randomness traits; and
 - documented developer commands.
 
@@ -716,15 +735,15 @@ Deliver:
 - exact COSE Sign1 profile;
 - key and descriptor handling;
 - DID parsing and derivation;
-- Contact Document and record schemas, including the registry-independent service-metadata grammars fixed by specification v0.6 and the URI and exact CBOR-label rules fixed by specification v0.7;
+- Contact Document and record schemas, including the registry-independent service-metadata grammars fixed by specification v0.6, the URI and exact CBOR-label rules fixed by specification v0.7, and the basic-validity classifications fixed by specification v0.8;
 - signing, verification, digesting and ordering;
 - the sole production strict-Ed25519 entry point and mechanical direct-call restriction; and
-- complete Appendix B tests.
+- complete Appendix B.2–B.10 core tests and byte-level reproduction of the B.11 relay fixtures.
 
 Acceptance:
 
 - every published positive byte sequence reproduces exactly;
-- every required negative mutation is rejected;
+- every required B.7 and B.10 core negative mutation is rejected;
 - every Appendix B.7 case follows the fault-isolation plan in Section 11.1 and records its construction provenance;
 - no case asserts an exact non-signature error while also retaining a signature invalidated by its mutation;
 - the B.4 `S + L` signature is independently recomputed, rejected as `invalidSignature`, and remains otherwise byte-identical to the positive case;
@@ -734,12 +753,16 @@ Acceptance:
 - the B.5 RootRevoked wiring test delegates exactly once with label `5`'s exact revealed revocation public key, COSE `Sig_structure` and received signature;
 - the public B.4 `S + L` test uses the non-injectable production record-verification wrapper;
 - CI rejects direct underlying-library verification calls outside the audited strict wrapper;
-- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained in specification v0.7 at the pinned commit;
+- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained in specification v0.8 at the pinned commit;
 - B.8 fails specifically with `identityBindingMismatch` despite a valid attacker signature;
-- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or a URI satisfying specification v0.7 Section 7.2, with no mutable registry lookup or normalization;
+- B.9 Bob keys, commitment, descriptor, DID, body, `Sig_structure`, digest, signature and envelope reproduce exactly, and Alice/Bob tests prove sticky authority and update state are keyed independently per DID;
+- all five B.10 raw bodies reproduce their stated digests and `Sig_structure` lengths, their signatures verify under Alice's legitimate root key, and every case fails exactly with `invalidCbor` rather than `nonDeterministicCbor`, `schemaViolation` or `invalidSignature`;
+- CBOR tests distinguish not-well-formed/basic-invalid input from basically valid non-deterministic input and from later Followee schema failures, recursively including ignored extension values while stopping at byte-string boundaries;
+- duplicate-map validation compares CBOR data-model key identity rather than bare host-language equality or raw bytes before deterministic validation;
+- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or a URI satisfying specification v0.8 Section 7.2, with no mutable registry lookup or normalization;
 - every numeric core label is accepted only from the corresponding CBOR unsigned-integer key; Boolean `false` and `true` substitutions in Authority Descriptors and public-key objects fail with `schemaViolation`, including the correctly signed, descriptor-bound Appendix B.7 item 17 construction;
 - URI conformance tests accept scheme-bearing queries and fragments, reject every relative-reference form, and accept both lowercase and uppercase `IPvFuture` introducers through the production Contact Document path;
-- service collection tests enforce both the independent 64-entry cap and the aggregate member cap, including the effective maxima of 61 minimal Root services and 60 minimal RootRevoked services;
+- service collection tests derive the effective Root and RootRevoked service maxima from the normative aggregate-member counting rule and current record schemas, assert that the computed results are respectively 61 and 60, and prove admission at each computed `N` with aggregate-limit rejection at `N + 1`; the independent 64-entry cap is tested separately, and 61/60 are expected computed results rather than fixture inputs;
 - candidate selection takes an explicit target DID and remains permutation-independent over a mixed-identity candidate set, with every winner belonging to the target;
 - future-bound, stale-record, absolute RootRevoked-precedence, no-fallback and sticky-state-loss tests described in Section 11.1 pass;
 - no untrusted parser panic under the initial fuzz corpus;
@@ -755,7 +778,8 @@ Deliver:
 - the separately maintained Python model and preserved v0.6 freeze/review tags described in Section 11.4;
 - an authoring record showing the original model was produced in a separate session using only its pinned v0.6 specification and `specification`-status fixtures, without access to Rust source or Rust-derived material;
 - a recorded commit or content digest freezing the reviewed model before provisional fixtures are revealed;
-- a reviewed v0.7 maintenance revision produced without access to Rust or differential material and frozen before v0.7 differential comparison;
+- the preserved reviewed v0.7 maintenance freeze identified in Section 11.4;
+- a reviewed v0.8 maintenance revision produced from the v0.7 clean-room repository and pinned v0.8 specification only, without access to Rust, harness reports or differential material, and frozen before v0.8 differential comparison;
 - independent Appendix B reproduction;
 - a differential harness that supplies provisional inputs only after the freeze and does not feed their expected outputs into model authoring; and
 - curated and randomized differential cases with the comparison rules in Section 11.4.
@@ -765,10 +789,13 @@ Acceptance:
 - the allowed authoring inputs and excluded Rust-derived inputs are recorded and auditable;
 - Appendix B positive values are independently reproduced rather than imported from Rust output;
 - the model’s frozen revision predates its first access to any `implementation`-status fixture;
-- the v0.7 maintenance record identifies the v0.6 and v0.7 specification pins and the reviewed v0.7 model revision;
+- the v0.8 maintenance record identifies the v0.7 and v0.8 specification pins and digests, the reviewed v0.7 model revision, and the reviewed v0.8 maintenance revision;
+- the Python CBOR decoder preserves every map entry until type-aware duplicate and deterministic checks complete, including integer/Boolean host-language collisions and differently encoded equivalent keys;
+- Appendix B.9 and B.10 reproduce independently from the v0.8 specification before Rust-derived inputs are exposed;
 - shared fixtures agree on acceptance or rejection, and every case marked `errorAssertion: exact` agrees on the specified symbolic error;
 - valid randomized shared operations agree on bytes and semantic results;
 - arbitrary malformed inputs agree on acceptance versus rejection;
+- the full v0.8 differential corpus is rerun and its report compares acceptance/rejection disagreements, permitted unspecified symbolic differences and genuine ambiguities with the archived v0.7 baseline and fixture-bundle digest;
 - fixture promotion follows Section 12 without changing the original bytes or expected result;
 - every disagreement is resolved against the specification and retained as a regression test; and
 - the model is small enough for direct human review and makes no claim to full Section 20.4 interoperability.
@@ -807,8 +834,11 @@ Deliver:
 Acceptance:
 
 - the relay passes Sections 20.1 and 20.2 tests applicable without peers;
+- Appendix B.11.1's basically invalid outer request receives HTTP `400` with no per-item processing, while B.11.6's valid three-item request receives HTTP `200` with the exact aligned `[Full(Alice), Error(invalidDid), Full(Bob)]` results;
+- duplicate requested DIDs are neither deduplicated nor reordered, every occurrence counts against the limit, and the resolve response count always equals the request count;
 - update numbers change exactly when specified;
 - resolve distinguishes Absent from a retained but presently premature record;
+- successful `changes` responses never exceed the request's `itemLimit` and never advance past an omitted eligible entry;
 - `changes` uses the exact two-field status-`1` response as the sole ResetRequired signal, forbids labels `2` through `6` in that response, and enforces every other status-dependent field rule;
 - restart preserves identity, generation and sticky authority state; and
 - malformed and oversized input is bounded before expensive processing.
@@ -829,9 +859,13 @@ Acceptance:
 - relays can begin with different partial views;
 - one relay can synchronize a newer record without historical events;
 - a client follows references but verifies the final Full locally;
+- an invalid or non-deterministic outer relay response is rejected without producing Absent, changing identity state, or terminating resolution while another already-selected relay remains reachable within the shared budgets;
+- Appendix B.11.3's accepted resolve wrapper discards only the invalid Alice candidate at index `0` and retains Bob at index `1`, without shifting results or recursively validating Full byte strings as part of wrapper parsing;
 - a client continues past Absent and Error results while another relay selected for the operation remains unqueried within the shared budgets;
 - Error(`premature`) from one relay cannot classify or suppress a Full candidate obtained from that or another relay, and the candidate is checked using the client's injected clock;
 - Absent and Error results cannot alter cached identity or sticky RootRevoked state;
+- Appendix B.11.5 advances the peer cursor to the exact returned `nextCursor` after rejecting Alice and admitting Bob, leaving Alice byte-for-byte unchanged and assigning only Bob's local update;
+- Appendix B.11.7's three-entry response to `itemLimit = 2` is rejected before any entry is processed, leaving identity state, update counter and stored peer cursor unchanged;
 - cycles and unavailable peers terminate within shared budgets; and
 - synchronized invalid or losing input does not alter current state.
 
@@ -884,7 +918,7 @@ An AI coding agent working from this brief should:
 
 For the first coding session, the agent should perform Milestone 0 only, then present the scaffold and CI for review. It should not begin cryptographic or CBOR implementation in the same unreviewed pass.
 
-An independently authored Python model must be assigned through a separate clean session whose context contains its pinned protocol specification and `specification`-status fixtures only. It must not receive Rust source, tests, implementation notes, provisional fixtures, Rust-derived expected outputs or differential reports until the reviewed model is frozen at a recorded revision. Maintenance of the existing clean-room model follows the narrower v0.7 update rules in Section 11.4. Do not ask the Rust implementation agent to produce its own “independent” model after reading the production code; independence cannot be added as a comment after the fact.
+An independently authored Python model must be assigned through a separate clean session whose context contains its pinned protocol specification and `specification`-status fixtures only. It must not receive Rust source, tests, implementation notes, provisional fixtures, Rust-derived expected outputs or differential reports until the reviewed model is frozen at a recorded revision. Maintenance of the existing clean-room model follows the narrower v0.8 update rules in Section 11.4. Do not ask the Rust implementation agent to produce its own “independent” model after reading the production code; independence cannot be added as a comment after the fact.
 
 ## 15. Definition of v0.1 completion
 
