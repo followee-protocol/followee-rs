@@ -3,10 +3,13 @@
 //! Non-normative Rust implementation of the Followee DID method and relay
 //! protocol.
 //!
-//! **Status: Milestone 1 (protocol core) in progress.** This crate implements
+//! **Status: Milestone 3 (single relay) in progress.** This crate implements
 //! the Followee v1 identifier, deterministic CBOR, COSE, strict Ed25519
-//! verification, record schemas, signing, and ordering rules. No relay,
-//! resolver, HTTP, or storage code exists yet.
+//! verification, record schemas, signing, and ordering rules, plus the
+//! single-relay protocol core: the [`store`] contract with memory and SQLite
+//! backends, and the [`relay`] admission, resolve, changes, and HTTP/CBOR
+//! surfaces. No resolver, synchronization-receiver, WebFinger, or CLI code
+//! exists yet.
 //!
 //! The normative authority for protocol behaviour is the pinned Followee
 //! specification in the `followee-protocol/followee` repository, not this
@@ -29,6 +32,8 @@ pub mod limits;
 pub mod ordering;
 pub mod random;
 pub mod record;
+pub mod relay;
+pub mod store;
 pub mod timestamp;
 pub mod verify;
 
@@ -92,5 +97,19 @@ pub mod fuzzing {
     /// routed through the public wrapper so one structural gate exists.
     pub fn validate_cbor(bytes: &[u8]) -> bool {
         crate::validate_cbor(bytes, MAX_BODY_DEPTH, MAX_BODY_MEMBERS).is_ok()
+    }
+
+    /// Parses arbitrary bytes as each relay API request wrapper
+    /// (specification section 12): must never panic, hang, or allocate
+    /// unboundedly.
+    pub fn parse_relay_request(bytes: &[u8]) {
+        let _ = crate::relay::wire::parse_resolve_request(bytes);
+        let _ = crate::relay::wire::parse_changes_request(bytes);
+    }
+
+    /// Decodes arbitrary bytes as an opaque changes cursor against a fixed
+    /// generation.
+    pub fn decode_cursor(bytes: &[u8]) {
+        let _ = crate::relay::cursor::decode(bytes, &[0u8; 16]);
     }
 }

@@ -1,10 +1,12 @@
-# Requirement traceability (Milestone 1)
+# Requirement traceability (Milestones 1 and 3)
 
 Mapping from testable MUST/MUST NOT requirements in the implemented
 specification sections (pinned commit in IMPLEMENTATION.md §2) to tests.
 Unit tests live in `src/<module>.rs`; integration tests in `tests/<file>.rs`.
-This map covers sections 3–8 and Appendix B; relay, resolver, WebFinger and
-DID-document-projection sections arrive with their milestones.
+This map covers sections 3–8 and Appendix B (Milestone 1) and the relay
+sections 5.4 (serving), 11–13, 15.2–15.4, and 20.2 (Milestone 3); resolver,
+synchronization-receiver, WebFinger and DID-document-projection sections
+arrive with their milestones.
 
 | Spec | Requirement | Tests |
 | --- | --- | --- |
@@ -56,8 +58,33 @@ DID-document-projection sections arrive with their milestones.
 | IMPL §7.3 | Checked arithmetic; injected clock/randomness | `clock::tests::*`, `random::tests::*`, crate-wide `arithmetic_side_effects = "deny"` |
 | Conformance API | Public `followee::validate_cbor` structural gate: §6.1 profile under explicit limits, §15.3 classifications, limits capped at the Followee maxima, single gate shared with fuzzing and the record path | `validate_cbor_api::*` (nine external tests incl. boundary, zero-limit, over-maxima, and record-path parity cases) |
 
-Known intentional gaps at this milestone: relay/resolver behaviour (§§10–14),
-DID Document projection (§9.6), WebFinger (§10), and the remote signer (§18)
-are later-milestone scope. `validUntil` staleness interacts with selection
-only through `authority::sec_8_2_stale_root_revoked_still_activates_transition`;
+## Milestone 3: single relay
+
+| Spec | Requirement | Tests |
+| --- | --- | --- |
+| §5.4 | Relay Resolver repeats the future-bound check before serving Full; a stored record that became premature is Error(`premature`), never Full or Absent; serving mutates nothing | `relay_core::sec_12_3_locally_premature_current_record_is_error_not_absent` |
+| §11.1 | Partial current map with Full/Ref tiers, authority state, `lastUpdated`; RootRevoked established only by local verification | `relay_core::*` admission suite; store contract tests in `relay_store_parity` |
+| §11.2 | Full→Ref conversion preserves learned RootRevoked state; retained ordering metadata prevents same-authority rollback | `relay_core::sec_11_2_conversion_to_ref_preserves_sticky_state_and_metadata`, `sec_11_2_retained_metadata_prevents_same_authority_rollback_through_a_ref` |
+| §11.3 | Dropping the entire entry drops sticky state; re-admission is a fresh observation | `relay_core::sec_8_5_dropping_the_entry_makes_the_relay_a_fresh_observer` |
+| §11.4 | Directory with 16-byte generation; index change requires fresh random generation (operator surface) | `relay_http::sec_12_4_directory_serves_generation_and_entries` |
+| §12.1 | Exact paths and media types; unknown top-level integer labels rejected; outer CBOR faults are HTTP `400` with no per-item body; CORS on public reads | `relay_http::sec_12_1_wrong_media_types_are_rejected_with_415`, `sec_15_4_outer_request_faults_are_http_400`, `sec_b11_1_…`, CORS asserts in `sec_12_2_…`/`sec_12_5_…` |
+| §12.2 | Info: version, 16-byte relay id, capability bits (0x07), versions `[1]`, suites `[-19]`, limits map, generations, base URI | `relay_http::sec_12_2_info_reports_identity_capabilities_versions_and_limits` |
+| §12.3 | Aligned per-DID results; duplicates never deduplicated/reordered; response count equals request count; malformed DID as valid UTF-8 → per-DID `Error(invalidDid)`; Absent ≠ premature; overflow degrades to aligned `Error(responseTooLarge)` | `relay_http::sec_b11_4_…`, `sec_b11_6_…`, `sec_12_3_response_splitting_…`; `relay_core::sec_12_3_results_align_with_duplicates_and_unknown_dids` |
+| §12.5 | Publish statuses: 0 admitted-current, 1 valid-no-change, 2 rejected + section 15.3 code | `relay_http::sec_12_5_publish_statuses_and_exact_byte_resolution`; `relay_core` admission suite |
+| §12.6 | Success needs labels 0–5, `errorCode` forbidden; status 1 is exactly `{0:1,1:1}`; status 2 needs `errorCode` and forbids the rest; entries ≤ `itemLimit`, increasing `lastUpdated`, coalesced; cursor never advances past an omitted eligible entry; single unfittable entry → `responseTooLarge`; value bounds are top-level schema faults | `relay_core::sec_12_6_status_dependent_field_combinations`, `sec_12_6_reset_is_status_1_only`, `sec_12_6_reset_response_is_exactly_labels_0_and_1`, `sec_12_6_success_pagination_…`, `sec_12_6_byte_limit_never_advances_…`; `relay_http::sec_12_6_changes_request_value_bounds_…`, `sec_12_6_changes_flow_and_exact_reset_bytes_over_http` |
+| §12.7 | Cursor commits to (generation, position), ≤ 128 bytes; foreign generation → ResetRequired; malformed → `invalidCursor`; reset permits complete null-cursor re-enumeration without deleting identity state | `relay::cursor::tests::sec_12_7_*`, `relay_core::sec_12_7_generation_reset_permits_bounded_reenumeration` |
+| §13.1 | Cheap limits before verification; complete §8.1 via the production core; premature rejected; sticky-excluded Root rejected (code 11); winner persisted atomically before acknowledgement | `relay_core::sec_13_1_*`, `sec_8_2_root_revoked_has_absolute_precedence_and_is_sticky`; `relay_store_parity::sec_13_1_sqlite_commits_survive_an_ungraceful_reopen` |
+| §13.2 | Update number increments iff admitted current state changes; duplicates, losers, invalid input, excluded Roots, and Full→Ref housekeeping never increment | `relay_core::sec_13_2_*`, `sec_8_3_equal_time_lower_digest_wins_and_increments`; `relay_properties::sec_13_2_relay_matches_the_simple_model_on_*` |
+| §13.5/§12.7 | Restart preserves identity, generations, entries, sticky state, and the counter; cursor-generation reset available for restore | `relay_http::sec_13_5_restart_preserves_identity_generation_and_sticky_state`, `relay_core::sec_12_7_generation_reset_…` |
+| §15.2/§15.4 | Hard message limits enforced; `400`/`413`/`415` classifications; bounded input before expensive processing | `relay_http::sec_15_4_*`, `sec_12_1_wrong_media_types_…`; wire-level fuzz targets |
+| §20.2 (peerless subset) | Admission/no-change outcomes, sticky state, Full→Ref conversion, batch alignment and splitting, duplicate cardinality, HTTP 400/200 split, coalesced changes, field combinations, pagination, generation reset, restore, bounded resource use | The suites above; backend parity in `relay_store_parity::impl_9_2_*` |
+| IMPL §9.2 | Both storage backends behave identically through one observable contract | `relay_store_parity::impl_9_2_backends_are_observationally_identical_through_the_relay`, `impl_9_2_store_contract_parity_on_direct_operations`, `with_both_backends` HTTP cases, `relay_properties` on both backends |
+| IMPL §9.5 | Development mode is loopback-only; conforming mode requires HTTPS base URI | `relay_http::impl_9_5_development_mode_refuses_non_loopback_binding`, `impl_9_5_conforming_config_requires_https_or_explicit_dev_mode` |
+
+Known intentional gaps at this milestone: client/resolver behaviour (§§9.2,
+9.6, 14), the synchronization receiver and peer cursors (§13.3, Milestone 4
+halves of B.11.2/B.11.3/B.11.5/B.11.7), WebFinger (§10), and the remote
+signer (§18) are later-milestone scope. `validUntil` staleness interacts
+with selection only through
+`authority::sec_8_2_stale_root_revoked_still_activates_transition`;
 richer freshness policy is client-milestone scope.

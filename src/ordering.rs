@@ -18,19 +18,39 @@ pub enum AuthorityState {
     RootRevoked,
 }
 
+/// Compares two same-authority ordering keys — `(timestamp_ms, body digest)`
+/// — under specification section 8.3: the greater timestamp wins; at an
+/// equal timestamp the lexicographically lower 32-byte body digest wins.
+/// `Ordering::Greater` means `a` wins. `Ordering::Equal` means the keys are
+/// duplicates by body digest. This is the single section 8.3 comparison;
+/// the relay's stored-metadata comparison and record selection both
+/// delegate to it.
+#[must_use]
+pub fn compare_ordering_keys(
+    a_timestamp_ms: u64,
+    a_digest: &[u8; 32],
+    b_timestamp_ms: u64,
+    b_digest: &[u8; 32],
+) -> Ordering {
+    match a_timestamp_ms.cmp(&b_timestamp_ms) {
+        // Lower digest wins, so reverse the byte comparison.
+        Ordering::Equal => b_digest.cmp(a_digest),
+        other => other,
+    }
+}
+
 /// Compares two records within the same authority state: the greater
 /// admissible timestamp wins; at an equal timestamp the lexicographically
 /// lower 32-byte body digest wins. `Ordering::Greater` means `a` wins.
 /// `Ordering::Equal` means the records are duplicates by body digest.
 #[must_use]
 pub fn compare_precedence(a: &VerifiedRecord, b: &VerifiedRecord) -> Ordering {
-    match a.timestamp_ms().cmp(&b.timestamp_ms()) {
-        Ordering::Equal => {
-            // Lower digest wins, so reverse the byte comparison.
-            b.body_digest().cmp(a.body_digest())
-        }
-        other => other,
-    }
+    compare_ordering_keys(
+        a.timestamp_ms(),
+        a.body_digest(),
+        b.timestamp_ms(),
+        b.body_digest(),
+    )
 }
 
 /// The result of a selection pass.

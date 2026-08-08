@@ -370,3 +370,40 @@ new rejection path.
 `negative_b7::sec_b7_item19_schema_disallowed_simple_values_are_exact_schema_violation`,
 `sec_b7_item19_undefined_extension_value_remains_non_deterministic_cbor`,
 `sec_b7_item19_simple_values_rejected_wherever_the_schema_expects_other_types`.
+
+---
+
+## Milestone 3 derived readings recorded for review (not open questions)
+
+The Milestone 3 relay resolved the following wire details from the pinned
+v0.8.1 text alone. Each is judged textually determined — no amendment is
+believed necessary — but the readings are recorded here so specification
+review can confirm or overturn them explicitly rather than discover them in
+code. None affects stored state, update numbers, alignment, or cursor
+semantics, which are unambiguous.
+
+1. **Publish status for a sticky-excluded Root record: `2` (rejected) with
+   code `11`.** Section 13.1 step 7 assigns "returns no-change" only to
+   duplicate and losing records; step 4 "drops" a post-revocation Root,
+   section 8.2 forbids admitting it, section 8.1 step 19 makes it fail
+   verification-with-state, and `rootRevoked` (11) exists for exactly this
+   condition. Step 4's "without state change" describes stored state, not
+   the wire status. (`relay_core::sec_8_2_root_revoked_has_absolute_precedence_and_is_sticky`)
+2. **Resolve response overflow: aligned per-DID `Error(responseTooLarge)`
+   for results that no longer fit the advertised response bound.** Section
+   12.3 permits any section 15.3 error as an aligned per-DID Error result,
+   and resolve has no batch-level error channel; alignment and cardinality
+   are mandatory. (`relay_http::sec_12_3_response_splitting_…`)
+3. **`changes` requests violating the section 12.6 value constraints (zero
+   or over-maximum `itemLimit`/`byteLimit`, cursor over 128 bytes) are
+   HTTP `400`** as section 15.4 top-level schema validation failures; a
+   within-bounds cursor that fails to decode is protocol-level
+   `invalidCursor` (status 2, code 18), and a structurally valid cursor
+   from a foreign generation is the status-1 reset.
+   (`relay_http::sec_12_6_changes_request_value_bounds_…`)
+4. **Publish body faults are protocol results (HTTP `200`, status 2 with
+   the section 15.3 code), not HTTP `400`.** The section 12.1 outer-CBOR
+   rule protects per-item batch alignment in `application/cbor` wrappers;
+   for publish the record itself is the protocol item, and the record
+   classification codes are only expressible through the publish response.
+   (`relay_http::sec_15_4_oversized_entities_…`, `relay_core` admission suite)

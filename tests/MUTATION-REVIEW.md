@@ -1,4 +1,4 @@
-# Mutation-testing review (Milestone 1)
+# Mutation-testing review (Milestones 1 and 3)
 
 `cargo-mutants` runs at milestone gates (IMPLEMENTATION.md section 11.7).
 This document is the review evidence for the Milestone 1 gate: the final
@@ -129,3 +129,45 @@ are pinned by
 `cbor::tests::sec_6_1_2_admits_schema_disallowed_simple_values_as_deterministic`,
 `validate_cbor_api`, the Appendix B.12 exact `schemaViolation` conformance
 suite, and the `negative_b7` item 19 cases.
+
+## Milestone 3 gate (single relay)
+
+Scoped sweep over every Milestone 3 production module (`src/relay/mod.rs`,
+`src/relay/wire.rs`, `src/relay/cursor.rs`, `src/relay/http.rs`,
+`src/store/mod.rs`, `src/store/sqlite.rs`, `src/ordering.rs`, `src/lib.rs`;
+cargo-mutants v27.1.0, `--jobs 6`, `PROPTEST_CASES=8`). The initial sweep
+reported 265 mutants: 210 caught, 28 unviable, 3 timeouts, 24 missed.
+Review classified 19 of the 24 as genuine boundary-coverage gaps and killed
+each with an added test:
+
+- resolve batch hard-maximum boundary (256 accepted, 257 → `400`);
+- `changes` request maxima (`itemLimit = 1024`, `byteLimit = 4 MiB`,
+  128-byte cursor) accepted at their exact bounds;
+- the cursor null-check (`false` and a 22-byte byte string must not alias
+  CBOR `null`), and a wrong `changes` protocol version;
+- a record at exactly 16 KiB admitted through `v1/publish`;
+- a 32 KiB publish body classified `recordTooLarge` rather than `413`
+  (pinning the transport read bound arithmetic);
+- byte-budget accounting pinned to the byte across the 24-entry CBOR
+  array-head width transition and at exact-fit/one-under budgets
+  (`sec_12_6_byte_budget_accounting_is_exact_across_the_array_head_boundary`,
+  `sec_12_6_byte_budget_binds_exactly_at_the_24_entry_head_boundary`);
+- SQLite true-path return values for `convert_to_ref`/`drop_entry`, the
+  persisted effect of `reset_cursor_generation`, and both `Debug`
+  implementations and the `development_mode` accessor.
+
+The confirming sweeps report **265 mutants: 227+ caught, 28 unviable, 3
+timeouts, 5 missed**, with every survivor individually explained:
+
+| Mutant | Explanation |
+| --- | --- |
+| `src/relay/mod.rs` `RELAY_CAPABILITIES` `\|` → `^` (two sites) | Equivalent: the capability bits `0x01`, `0x02`, `0x04` are disjoint, so OR equals XOR — the same family as the long-documented `cbor.rs` disjoint-operand mutants. The composed value `0x07` is pinned by the info-endpoint test. |
+| `src/lib.rs` `fuzzing::parse_relay_request` / `fuzzing::decode_cursor` → `()` | Fuzz-harness glue, not protocol code: these `#[doc(hidden)]` entry points only forward arbitrary bytes to the wire/cursor parsers for the `relay_request_parse` and `cursor_decode` fuzz targets, and are exercised by the fuzz smoke rather than `cargo test`. The parsers themselves are fully covered by the wire and cursor test suites. |
+| `src/store/sqlite.rs` `entry_from_row`: delete the `(None, None, None)` ordering arm | Defensive corruption classification that is unreachable through the store contract: `SqliteStore` always persists ordering metadata on commit and preserves it on conversion, so a row without it can only be produced by out-of-band database edits. The `ordering: None` contract semantics are exercised through `MemoryStore`. |
+
+Three mutants are reported as timeouts rather than misses: inverting the
+development-mode loopback guard (`development_mode -> false`, `delete !` in
+`serve`) prevents every test server from starting, and reversing the SQLite
+`changes_after` `has_more` comparison makes pagination loop; each hangs the
+suite, which a CI run fails by timeout. No surviving mutant weakens a
+normative or security-sensitive branch.
