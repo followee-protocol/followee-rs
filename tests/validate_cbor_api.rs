@@ -73,14 +73,41 @@ fn rejects_non_minimal_and_indefinite_encodings_as_non_deterministic() {
 }
 
 #[test]
-fn rejects_duplicate_and_misordered_map_keys_as_non_deterministic() {
-    // {1:0, 0:0} misordered; {0:0, 0:1} duplicate.
+fn sec_6_1_2_rejects_misordered_map_keys_as_non_deterministic() {
+    // {1:0, 0:0} misordered: a deterministic-profile fault.
     assert_eq!(
         full(&[0xa2, 0x01, 0x00, 0x00, 0x00]),
         Err(VerifyError::NonDeterministicCbor)
     );
+}
+
+#[test]
+fn sec_6_1_1_rejects_duplicate_map_keys_as_invalid_cbor() {
+    // {0:0, 0:1} duplicate: a basic-validity fault under v0.8, distinct
+    // from the misordered-key profile fault.
     assert_eq!(
         full(&[0xa2, 0x00, 0x00, 0x00, 0x01]),
+        Err(VerifyError::InvalidCbor)
+    );
+    // Recursion reaches duplicates nested inside extension-like values.
+    assert_eq!(
+        full(&[0xa1, 0x00, 0x81, 0xa2, 0x00, 0x00, 0x00, 0x01]),
+        Err(VerifyError::InvalidCbor)
+    );
+}
+
+#[test]
+fn sec_6_1_1_key_equivalence_is_typed_and_byte_strings_are_opaque() {
+    // Unsigned 0 and simple false are distinct generic-data-model keys.
+    assert_eq!(full(&[0xa2, 0x00, 0x00, 0xf4, 0x00]), Ok(()));
+    // A byte string whose contents are malformed CBOR is a valid item:
+    // validation stops at byte-string boundaries.
+    assert_eq!(full(&[0x43, 0xff, 0xff, 0xff]), Ok(()));
+    // A non-minimally encoded key hiding a data-model duplicate is
+    // multi-fault (sections 6.1.1/6.1.3); this implementation reports the
+    // encoding fault it meets first.
+    assert_eq!(
+        full(&[0xa2, 0x00, 0x00, 0x18, 0x00, 0x00]),
         Err(VerifyError::NonDeterministicCbor)
     );
 }
@@ -183,6 +210,17 @@ fn classification_parity_with_the_record_verification_path() {
     assert_eq!(
         verify_record(&alice_did(), &envelope).map(|_| ()),
         Err(VerifyError::NonDeterministicCbor)
+    );
+
+    // Duplicate body label: both say InvalidCbor (v0.8 basic validity).
+    let mut entries = b4_raw_entries();
+    entries.insert(1, (r_uint(0), r_uint(1)));
+    let payload = r_map(&entries);
+    assert_eq!(full(&payload), Err(VerifyError::InvalidCbor));
+    let envelope = seal(&payload, &root_seed());
+    assert_eq!(
+        verify_record(&alice_did(), &envelope).map(|_| ()),
+        Err(VerifyError::InvalidCbor)
     );
 
     // The valid B.4 body passes the wrapper, and its envelope verifies.

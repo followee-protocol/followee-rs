@@ -116,12 +116,17 @@ pub(crate) fn verify_record_with_verifier(
         return Err(VerifyError::RecordTooLarge);
     }
 
-    // Steps 2–3: exactly one tagged COSE Sign1 object with the exact profile.
+    // Steps 2–3: exactly one tagged COSE Sign1 object with the exact
+    // profile, applying the section 6.1 well-formedness, basic-validity, and
+    // deterministic-profile classifications. The payload byte string is
+    // opaque at this boundary (section 6.1.1).
     let parts = cose::parse_envelope(candidate)?;
     let payload = &candidate[parts.payload.clone()];
 
-    // Step 4: the payload is one deterministic record body with no trailing
-    // bytes, within depth and member limits.
+    // Step 4: the payload is one basically valid, deterministic record body
+    // with no trailing bytes, within depth and member limits. Validation
+    // recurses through unknown extension values (duplicate keys and invalid
+    // UTF-8 anywhere in the body are `invalidCbor`).
     cbor::validate(payload, MAX_BODY_DEPTH, MAX_BODY_MEMBERS)?;
 
     // Steps 5, 10, 15, 16: exact v1 schema, including the authority-dependent

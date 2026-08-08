@@ -1,4 +1,4 @@
-//! Strict deterministic CBOR subset (specification section 6.1).
+//! Strict deterministic CBOR subset (specification section 6.1, v0.8).
 //!
 //! This is a protocol-specific codec, not a general CBOR library
 //! (IMPLEMENTATION.md section 6.1). The reader retains exact received byte
@@ -6,6 +6,17 @@
 //! it, and enforces nesting, member, and byte limits before allocation. The
 //! writer produces the unique deterministic encoding for every Followee v1
 //! structure.
+//!
+//! Section 6.1 defines three successive layers. Well-formedness and basic
+//! validity (section 6.1.1: unique map keys under generic-data-model
+//! equivalence, RFC 3629 UTF-8 text) classify as `invalidCbor`; the
+//! deterministic profile (section 6.1.2: definite lengths, minimal
+//! encodings, bytewise key order, no tags/floats/`undefined`) classifies as
+//! `nonDeterministicCbor` for basically valid items; Followee schemas are
+//! layered above by the typed parsers. Validation recurses through every
+//! array and map — including unknown extension values — and stops at
+//! byte-string boundaries: byte-string contents are opaque and are never
+//! reinterpreted as CBOR by this validator.
 
 /// Classification of a rejected CBOR input.
 ///
@@ -14,11 +25,14 @@
 /// `nonDeterministicCbor`, [`CborError::LimitExceeded`] → `schemaViolation`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CborError {
-    /// The bytes cannot be parsed safely as CBOR at all.
+    /// The bytes are not well-formed CBOR, or are well-formed but fail
+    /// RFC 8949 basic validity (section 6.1.1): duplicate map keys under
+    /// generic-data-model equivalence, or text strings that are not valid
+    /// RFC 3629 UTF-8.
     Invalid,
-    /// The bytes parse as CBOR but violate the section 6.1 deterministic
-    /// profile: non-minimal encodings, indefinite lengths, unordered or
-    /// duplicate map keys, tags, floats, `undefined`, or reserved simples.
+    /// Basically valid CBOR that violates the section 6.1.2 deterministic
+    /// profile: non-minimal encodings, indefinite lengths, misordered map
+    /// keys, tags, floats, `undefined`, or reserved simples.
     NonDeterministic,
     /// The bytes exceed a nesting-depth or member-count limit.
     LimitExceeded,
@@ -263,10 +277,24 @@ fn validate_value(
                 validate_value(r, inner, members, max_members)?;
                 let key = r.slice_since(key_start);
                 if let Some(prev) = prev_key {
-                    // Bytewise lexicographic order of encoded keys; equality
-                    // is a duplicate. Both violate section 6.1.
-                    if key <= prev {
-                        return Err(CborError::NonDeterministic);
+                    // Every key reaching this comparison already passed
+                    // `read_head`, which admits only the one deterministic
+                    // encoding per value, so comparing received encodings is
+                    // the section 6.1.1 data-model key comparison: equal
+                    // bytes are equal values (a basic-validity duplicate,
+                    // `invalidCbor`), and keys of different generic types
+                    // (for example unsigned `0` and simple `false`) always
+                    // encode differently and stay distinct. Descending
+                    // bytewise order violates only the section 6.1.2
+                    // deterministic profile (`nonDeterministicCbor`). An
+                    // input whose duplicate hides behind a non-minimal key
+                    // encoding is multi-fault and is reported as the
+                    // encoding fault `read_head` met first, as permitted by
+                    // sections 6.1.1 and 6.1.3.
+                    match key.cmp(prev) {
+                        std::cmp::Ordering::Equal => return Err(CborError::Invalid),
+                        std::cmp::Ordering::Less => return Err(CborError::NonDeterministic),
+                        std::cmp::Ordering::Greater => {}
                     }
                 }
                 prev_key = Some(key);
@@ -471,21 +499,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unordered_and_duplicate_map_keys() {
+    fn sec_6_1_2_rejects_misordered_map_keys_as_non_deterministic() {
         // {1: 0, 0: 0} — reversed order.
         assert_eq!(
             ok(&[0xa2, 0x01, 0x00, 0x00, 0x00]),
             Err(CborError::NonDeterministic)
         );
-        // {0: 0, 0: 1} — duplicate.
-        assert_eq!(
-            ok(&[0xa2, 0x00, 0x00, 0x00, 0x01]),
-            Err(CborError::NonDeterministic)
-        );
         // {0: 0, 1: 1} — correct.
         assert_eq!(ok(&[0xa2, 0x00, 0x00, 0x01, 0x01]), Ok(()));
-        // Text keys order by encoded bytes: "b" (0x6162?) no — "b" = 0x61 0x62.
-        // {"b": 0, "aa": 0}: encoded "b" = 61 62, "aa" = 62 61 61; 6162 < 626161 so this order is correct.
+        // Text keys order by encoded bytes: "b" = 61 62, "aa" = 62 61 61;
+        // 6162 < 626161 so {"b": 0, "aa": 0} is correctly ordered.
         assert_eq!(
             ok(&[0xa2, 0x61, 0x62, 0x00, 0x62, 0x61, 0x61, 0x00]),
             Ok(())
@@ -498,11 +521,75 @@ mod tests {
     }
 
     #[test]
+    fn sec_6_1_1_rejects_duplicate_map_keys_as_invalid() {
+        // {0: 0, 0: 1} — adjacent identical deterministic keys: basic
+        // validity (RFC 8949 section 5.6), not the deterministic profile.
+        assert_eq!(ok(&[0xa2, 0x00, 0x00, 0x00, 0x01]), Err(CborError::Invalid));
+        // Identical text keys.
+        assert_eq!(
+            ok(&[0xa2, 0x61, 0x61, 0x00, 0x61, 0x61, 0x01]),
+            Err(CborError::Invalid)
+        );
+        // Nested: the duplicate map sits inside an array inside a map value.
+        assert_eq!(
+            ok(&[0xa1, 0x00, 0x81, 0xa2, 0x00, 0x00, 0x00, 0x01]),
+            Err(CborError::Invalid)
+        );
+    }
+
+    #[test]
+    fn sec_6_1_1_key_equivalence_is_data_model_typed() {
+        // Unsigned 0 and simple false are different generic-data-model
+        // values: {0: 0, false: 0} has unique keys and sorts 00 < f4.
+        assert_eq!(ok(&[0xa2, 0x00, 0x00, 0xf4, 0x00]), Ok(()));
+        // Unsigned 0 and negative -1 (0x20) are likewise distinct.
+        assert_eq!(ok(&[0xa2, 0x00, 0x00, 0x20, 0x00]), Ok(()));
+        // {0: 0, 0x1800: 0}: the second key is the same unsigned 0 encoded
+        // non-minimally, a data-model duplicate hidden behind a profile
+        // fault. Multi-fault per section 6.1.3; this implementation reports
+        // the encoding fault it meets first.
+        assert_eq!(
+            ok(&[0xa2, 0x00, 0x00, 0x18, 0x00, 0x00]),
+            Err(CborError::NonDeterministic)
+        );
+    }
+
+    #[test]
+    fn sec_6_1_1_byte_string_contents_are_opaque() {
+        // A byte string whose contents happen to be malformed CBOR (a stray
+        // break byte, truncated heads, invalid UTF-8 for a tstr head) is a
+        // valid byte string: recursion stops at byte-string boundaries.
+        for contents in [&[0xffu8][..], &[0x19, 0x01], &[0x61, 0xff], &[0xa2]] {
+            let mut bytes = vec![0x40 | contents.len() as u8];
+            bytes.extend_from_slice(contents);
+            assert_eq!(ok(&bytes), Ok(()), "opaque bstr {contents:02x?}");
+        }
+        // The same bytes as a top-level item are rejected.
+        assert_eq!(ok(&[0xff]), Err(CborError::Invalid));
+    }
+
+    #[test]
     fn rejects_truncation_trailing_and_bad_utf8() {
         assert_eq!(ok(&[0x41]), Err(CborError::Invalid)); // bstr length 1, no body
         assert_eq!(ok(&[0x19, 0x01]), Err(CborError::Invalid)); // truncated head
         assert_eq!(ok(&[0x00, 0x00]), Err(CborError::Invalid)); // trailing byte
         assert_eq!(ok(&[0x61, 0xff]), Err(CborError::Invalid)); // invalid UTF-8
+    }
+
+    #[test]
+    fn sec_6_1_1_rejects_every_rfc_3629_utf8_exclusion_as_invalid() {
+        // Each text string is CBOR-complete (the head declares exactly the
+        // bytes present), so invalid UTF-8 is the only fault: basic
+        // validity, `invalidCbor`.
+        let cases: [&[u8]; 4] = [
+            &[0x62, 0xc0, 0xae],             // overlong U+002E
+            &[0x63, 0xed, 0xa0, 0x80],       // lone surrogate U+D800
+            &[0x64, 0xf4, 0x90, 0x80, 0x80], // U+110000 above the maximum
+            &[0x62, 0xe2, 0x82],             // incomplete three-byte code point
+        ];
+        for bytes in cases {
+            assert_eq!(ok(bytes), Err(CborError::Invalid), "{bytes:02x?}");
+        }
     }
 
     #[test]

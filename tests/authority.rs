@@ -183,6 +183,78 @@ fn sec_8_3_later_timestamp_wins_within_root_revoked_state() {
 }
 
 #[test]
+fn sec_b9_sticky_authority_state_is_keyed_independently_per_did() {
+    // Alice's normative B.5 revocation is in the candidate pool alongside
+    // Bob's normative B.9 Root record. Revoking Alice must not leak into
+    // Bob's selection, sticky state, or winner (Appendix B.9).
+    let alice_revoked =
+        verify_record(&alice_did(), &fx_bytes("root_revoked_envelope")).expect("B.5 verifies");
+    let bob_root = verify_record(&bob_did(), &fx_bytes("bob_envelope")).expect("B.9 verifies");
+    let pool = [alice_revoked.clone(), bob_root.clone()];
+
+    let alice = select_current(&alice_did(), &pool, NOW, AuthorityState::Unknown);
+    assert_eq!(alice.authority_state, AuthorityState::RootRevoked);
+    assert_eq!(
+        alice.winner.expect("Alice winner").body_digest(),
+        alice_revoked.body_digest()
+    );
+
+    // Bob's selection over the same pool is untouched by Alice's transition,
+    // with or without Alice's sticky state retained by the caller.
+    for bob_sticky in [AuthorityState::Unknown, AuthorityState::Root] {
+        let bob = select_current(&bob_did(), &pool, NOW, bob_sticky);
+        assert_eq!(bob.authority_state, AuthorityState::Root);
+        assert_eq!(
+            bob.winner.expect("Bob winner").body_digest(),
+            bob_root.body_digest()
+        );
+    }
+
+    // Alice's sticky RootRevoked state applies to Alice only; supplying it
+    // for Alice cannot suppress Bob's Root record in Bob's selection.
+    let alice_after = select_current(&alice_did(), &pool, NOW, AuthorityState::RootRevoked);
+    assert_eq!(alice_after.authority_state, AuthorityState::RootRevoked);
+    let bob_after = select_current(&bob_did(), &pool, NOW, AuthorityState::Unknown);
+    assert_eq!(
+        bob_after.winner.expect("Bob winner").body_digest(),
+        bob_root.body_digest()
+    );
+}
+
+#[test]
+fn sec_b9_mixed_identity_candidates_never_choose_a_foreign_winner() {
+    // A mixed-identity pool in any order yields a winner belonging to the
+    // explicit target, and adding or reordering the other identity's valid
+    // records never changes the target's winner or authority state.
+    let alice_root =
+        verify_record(&alice_did(), &fx_bytes("root_record_envelope")).expect("B.4 verifies");
+    let bob_root = verify_record(&bob_did(), &fx_bytes("bob_envelope")).expect("B.9 verifies");
+
+    for pool in [
+        vec![alice_root.clone(), bob_root.clone()],
+        vec![bob_root.clone(), alice_root.clone()],
+        vec![bob_root.clone(), alice_root.clone(), bob_root.clone()],
+    ] {
+        let selection = select_current(&alice_did(), &pool, NOW, AuthorityState::Unknown);
+        let winner = selection.winner.expect("Alice winner");
+        assert_eq!(&winner.body().id, &alice_did(), "winner belongs to target");
+        assert_eq!(winner.body_digest(), alice_root.body_digest());
+        assert_eq!(selection.authority_state, AuthorityState::Root);
+    }
+
+    // Bob-only pool for Alice: no winner, and Alice's sticky input state is
+    // reported back unchanged rather than inferred from foreign candidates.
+    let selection = select_current(
+        &alice_did(),
+        std::slice::from_ref(&bob_root),
+        NOW,
+        AuthorityState::Unknown,
+    );
+    assert!(selection.winner.is_none());
+    assert_eq!(selection.authority_state, AuthorityState::Unknown);
+}
+
+#[test]
 fn duplicate_candidates_select_the_same_record() {
     let record = make_root(NOW - 1_000, None);
     let candidates = [record.clone(), record.clone(), record.clone()];

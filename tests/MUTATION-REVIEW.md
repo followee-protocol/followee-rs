@@ -88,3 +88,23 @@ Appendix B.7 item 17 additions, a scoped sweep over the changed parser file
 exactly the three survivors already explained above (the `is_language_tag`
 entry-guard equivalence and the two unobservable media-type length-cap
 boundary mutants). No new survivor was introduced by the v0.7 changes.
+
+**v0.8 re-pin addendum:** the v0.8 maintenance pass changed one production
+branch — `src/cbor.rs` map-key validation now classifies duplicate keys as
+`Invalid` (basic validity, `invalidCbor`) and misordered keys as
+`NonDeterministic` — plus documentation-only updates in `src/error.rs`,
+`src/lib.rs`, and `src/verify.rs`. A scoped sweep over all four changed
+files (cargo-mutants v27.1.0, `--jobs 2`) reported 165 mutants: 149 caught,
+8 unviable, 8 missed. Seven of the eight were the long-documented `cbor.rs`
+equivalents above (the disjoint-operand `|` → `^` family and the major-7
+fall-through arm). The eighth — `replace < with <=` in the new key-order
+comparison — was equivalent only because the preceding equality branch made
+`key == prev` unreachable at that point; rather than document another
+equivalent, the comparison was restructured as an exhaustive
+`key.cmp(prev)` match, removing that mutation surface. A confirming scoped
+sweep over `src/cbor.rs` then reported 121 mutants: 113 caught, 1 unviable,
+7 missed — exactly the seven pre-existing documented equivalents, none of
+which weakens a normative branch. The v0.8 classification change itself is
+pinned by the duplicate/misordered split tests in `cbor::tests`,
+`validate_cbor_api`, `negative_b7` item 9, and the Appendix B.10 exact
+`invalidCbor` conformance suite.

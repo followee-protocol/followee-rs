@@ -9,7 +9,10 @@ to, reused by, or placed in the authoring context of that model's separate
 session. It also uses pyca/cryptography's ordinary Ed25519 verify, which is
 NOT a Followee-strict section 3.3 verifier.
 
-Verified against spec v0.2 vectors: 27/27 values reproduce byte-for-byte.
+Verified against spec v0.8 vectors (Appendix B.2–B.11): 76/76 values
+reproduce byte-for-byte, including the B.9 Bob identity, the B.10
+fault-isolated basic-validity signatures, and the B.11 wrapper lengths and
+SHA-256 digests.
 Requires: python3 with the `cryptography` package.
 """
 import hashlib
@@ -155,5 +158,117 @@ mutated = sig4[:32] + ((S + L).to_bytes(32, 'little'))
 check("S+L 64-byte signature", mutated, H("4db146d7bc6ca7690bac44b0c6ef38bcdd685ff157fdcca15da6b64662a26f94aa69aeecb156fa78fa072ff9a4e54a9e67103f9346dbef51c053cac381a50214"))
 strict_rejects = not verify(root_pub, mutated, ss4)
 print(f"  note: cryptography lib rejects S+L signature: {strict_rejects}")
+
+print("=== B.9 Bob identity (v0.8) ===")
+bob_pub, bob_sk = pub_from_seed("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f")
+check("Bob root public key", bob_pub, H("cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa"))
+bob_rev_pub, _ = pub_from_seed("a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf")
+check("Bob revocation public key", bob_rev_pub, H("4fd099ccd47d7893dfe9ec24414ecb0d9b5420232aad30d91c465be33cbe65c4"))
+check("Bob revocation public-key CBOR", pk_cbor(bob_rev_pub),
+      H("a200320158204fd099ccd47d7893dfe9ec24414ecb0d9b5420232aad30d91c465be33cbe65c4"))
+bob_rc = rev_commitment(bob_rev_pub)
+check("Bob revocation commitment", bob_rc, H("46ed171c07da81226f954a36b2e61c3be4caee1f7b5d78aa6022eedb69486c41"))
+bob_desc = descriptor_cbor(bob_pub, bob_rc)
+check("Bob Authority Descriptor CBOR", bob_desc, H("a3000101a20032015820cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa02582046ed171c07da81226f954a36b2e61c3be4caee1f7b5d78aa6022eedb69486c41"))
+bob_digest, bob_did = did_from_descriptor(bob_desc)
+check("Bob descriptor digest", bob_digest, H("ddc23bec60a7a9dad831d8c52439b9f3f30e17012da4d948233ece41154817ba"))
+check("Bob Followee DID", bob_did, "did:flw:zQmdGJbJu6pBbiyZX9gJHBTFxnUCtBgRa7mZRcKKs1TcFEy")
+bob_contact = {0: "Bob Example", 1: "Reader", 3: ["acct:bob@example.net"],
+               4: [{0: "feed", 1: "Feed", 2: "https://bob.example/feed.xml",
+                    3: "application/atom+xml", 4: "Reading"}]}
+body9 = enc({0: 1, 1: bob_did, 2: 1785589201123, 3: 0,
+             4: {0: 1, 1: {0: -19, 1: bob_pub}, 2: bob_rc}, 7: bob_contact})
+check("Bob record body CBOR", body9, H("a600010178376469643a666c773a7a516d64474a624a753670426269795a5839674a48425446786e55437442675261376d5a52634b4b73315463464579021b0000019fbd68f8e3030004a3000101a20032015820cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa02582046ed171c07da81226f954a36b2e61c3be4caee1f7b5d78aa6022eedb69486c4107a4006b426f62204578616d706c650166526561646572038174616363743a626f62406578616d706c652e6e65740481a500646665656401644665656402781c68747470733a2f2f626f622e6578616d706c652f666565642e786d6c03746170706c69636174696f6e2f61746f6d2b786d6c046752656164696e67"))
+ss9 = sig_structure(body9)
+check("Bob Sig_structure length == 321", str(len(ss9)), "321")
+check("Bob body digest", hashlib.sha256(body9).digest(), H("c7d107d8004c0376b453d7de0eaf187f0597e0b4edccac307a81ddba3b8fcda8"))
+sig9 = sign(bob_sk, ss9)
+check("Bob signature", sig9, H("958a63029defee36e1047c002a8346aa57c832ed8fc27781ee622cc92330bc434c8f075aa89290b2c1021bf19602a92b5681ae6615268ed928bd113f15c60202"))
+env9 = envelope(body9, sig9)
+check("Bob complete envelope tail", env9[-64:], sig9)
+
+print("=== B.10 fault-isolated basic-validity records (v0.8) ===")
+EXT_KEY = "https://example.com/ext"
+b10_values = [
+    ("duplicate-key", enc_head(5, 2) + enc(0) + enc(0) + enc(0) + enc(1),
+     "128fec939e1273f890be281a82f7bfac1134e3bab9bc0651022f3a6000698dd2", 358,
+     "afba8e1577abd9c6383b8df9a5c05913df217b3f1c4dc0c4c0027f9a44629d1a397dd4ad36f6e01028a3060a8481690cc589e2f9525e597f0a6a0cf60c9cb404"),
+    ("overlong U+002E", enc_head(3, 2) + b"\xc0\xae",
+     "4b8cc526c781c6b9ba707b6393f392f1132b0e5d18a7e7611a583d1013278f70", 356,
+     "738365f103b6f943311c4f339bcd4889e405129e2643d57f2fd3698adc50d8da8df529b886252b62727233a828769dabcac7c0add28f442e72c325905844a50e"),
+    ("lone U+D800", enc_head(3, 3) + b"\xed\xa0\x80",
+     "fd9cbe63338d1a3a1791c596db9a3824376070a7126aab2064d90bd62333afe8", 357,
+     "7fcefa0e654da023a71dc8ed5e2cb988ac4111a9b3a75e88c5757e2b59d792e965ff004eae3c26c13e29fe56c7addec04fad04e4f18e5ba375a827c02028e103"),
+    ("U+110000", enc_head(3, 4) + b"\xf4\x90\x80\x80",
+     "95bfb5eb8a921a0b7ceeff63a81ccd6404cf7e64945d9d888805f208b49e4204", 358,
+     "28ecb7c9e471940d077cd3d24f1e348aaac855be352523ae9867ef2839bbdf6d8794f110e0d4a79055009dd803afdd259729c16c70746acab0ad620d190e0607"),
+    ("incomplete 3-byte", enc_head(3, 2) + b"\xe2\x82",
+     "60e93b06213c6038ab697b796f8264cc854dc12442efbf15f2abd35eae165e09", 356,
+     "e7cd9850280f108e8caf550cdff381765c957dc53993b28a57d8f4b362f5e624105d83ffe12b22df2d3ca8d54c833030f1fa1617cd1e4b8697f670aa41d7c601"),
+]
+for name, value_bytes, digest_hex, ss_len, sig_hex in b10_values:
+    raw = bytearray(body4)
+    assert raw[0] == 0xA6
+    raw[0] = 0xA7
+    raw += enc(8) + enc_head(5, 1) + enc(EXT_KEY) + value_bytes
+    raw = bytes(raw)
+    check(f"B.10 {name} body digest", hashlib.sha256(raw).digest(), H(digest_hex))
+    ss10 = sig_structure(raw)
+    check(f"B.10 {name} Sig_structure length == {ss_len}", str(len(ss10)), str(ss_len))
+    check(f"B.10 {name} signature (Alice root key)", sign(root_sk, ss10), H(sig_hex))
+
+print("=== B.11 relay-wrapper vectors (v0.8) ===")
+GEN = H("000102030405060708090a0b0c0d0e0f")
+env4 = envelope(body4, sig4)
+body8_env = H("d28443a10132a0590118a600010178376469643a666c773a7a516d5063477374426137775739686f59516253364a5a345578775a6d6f4b7237595666397937717869794433436d021b0000019fbd68f4fb030004a3000101a200320158202543b92ff1095511476adc8369db6ddc933665a11978dda1404ee1066ca9559d0258202a35f76c8bcc0c5fc69e99d51656c2a93a1c8e447677d6f78c8c9d729eef3ca607a4006d416c696365204578616d706c650166577269746572038176616363743a616c696365406578616d706c652e636f6d0481a500646665656401644665656402781e68747470733a2f2f616c6963652e6578616d706c652f666565642e786d6c03746170706c69636174696f6e2f61746f6d2b786d6c046757726974696e675840b8352e21b1168a4c74020f2b7cf10b519fda4fb0c2465a682328f802c08b1873e1b1c137b79cce7f81aa00fc1a5630e34c19500a016b45867c9900108625650e")
+
+def check_wrapper(name, built, length, sha_hex, exact_hex=None):
+    check(f"{name} length == {length}", str(len(built)), str(length))
+    check(f"{name} SHA-256", hashlib.sha256(built).digest(), H(sha_hex))
+    if exact_hex:
+        check(f"{name} exact bytes", built, H(exact_hex))
+
+# B.11.1: duplicate top-level label 1 entries — manual, enc() cannot emit it.
+b11_1 = enc_head(5, 3) + enc(0) + enc(1) + enc(1) + enc([did]) + enc(1) + enc([bob_did])
+check_wrapper("B.11.1 request", b11_1, 121, "0f3aa1e98de0c1d63a2dd740e04542be326e550e75a133ade1ac045694bfb790")
+
+# B.11.2: protocol version non-minimally encoded as 18 01.
+b11_2 = enc_head(5, 3) + enc(0) + b"\x18\x01" + enc(1) + enc(GEN) + enc(2) + enc([{0: 2}])
+check_wrapper("B.11.2 response", b11_2, 27, "251497e0a44248c6099c5851e0c6668c0731d2b7f1f610f28c6f3c42254475cf")
+
+check_wrapper("B.11.3 request", enc({0: 1, 1: [did, bob_did]}), 119,
+              "a2d1d1944182db0f42468bdcaeb086d1987ee3570b892811a378f0ec3bbbca78")
+check_wrapper("B.11.3 response",
+              enc({0: 1, 1: GEN, 2: [{0: 0, 1: body8_env}, {0: 0, 1: env9}]}), 743,
+              "62246877adbd56be2996ea37d05475d88c0e7932ff9b042f8ddbb9a809f8f4ca")
+
+check_wrapper("B.11.4 request", enc({0: 1, 1: [did, did, bob_did]}), 176,
+              "ea2c9422529945ce78406f486c80ad633a1e90726cd493dedfa4347df373cf73")
+check_wrapper("B.11.4 response",
+              enc({0: 1, 1: GEN, 2: [{0: 0, 1: env4}, {0: 0, 1: env4}, {0: 0, 1: env9}]}), 1106,
+              "203e22e2d913359b08070c289d60889770bcdeee0584187dee25e1c8e05fdfe8")
+
+check_wrapper("B.11.5 request", enc({0: 1, 1: b"v08-0000", 2: 2, 3: 1048576}), 21,
+              "e65ad99bab6cd0eefba501a8e65ecfb30ad8ad453da9e554346e2becaab339df")
+# enc() deliberately refuses booleans, so the changes-response wrappers with
+# `hasMore = false` (f4) are assembled manually in deterministic label order.
+b11_5_resp = enc_head(5, 6) + enc(0) + enc(1) + enc(1) + enc(0) + enc(2) + \
+    enc([[did, {0: 0, 1: body8_env}, 1001], [bob_did, {0: 0, 1: env9}, 1002]]) + \
+    enc(3) + enc(b"v08-0002") + enc(4) + b"\xf4" + enc(5) + enc(GEN)
+check_wrapper("B.11.5 response", b11_5_resp, 879,
+              "3337aa0be1d6b8cbf856a31657490398a4b778de586e0b292da68c5c26c200f2")
+
+check_wrapper("B.11.6 request", enc({0: 1, 1: [did, "did:flw:not-a-multibase", bob_did]}), 143,
+              "8276648c9938dcc57a004695414bc7bd6776186b8df1626210667abf1c9ccf38")
+check_wrapper("B.11.6 response",
+              enc({0: 1, 1: GEN, 2: [{0: 0, 1: env4}, {0: 3, 2: 0}, {0: 0, 1: env9}]}), 748,
+              "d8a36364ed62a8fabb905f6c20c04304fe1803df10fa1680840c5c7cd1af96fa")
+
+atk_env7 = enc_head(5, 6) + enc(0) + enc(1) + enc(1) + enc(0) + enc(2) + \
+    enc([[did, {0: 0, 1: body8_env}, 1001], [bob_did, {0: 0, 1: env9}, 1002],
+         [atk_did, {0: 1, 1: 0}, 1003]]) + \
+    enc(3) + enc(b"v08-0003") + enc(4) + b"\xf4" + enc(5) + enc(GEN)
+check_wrapper("B.11.7 response", atk_env7, 945,
+              "334740ea2ce15b4b70dfcdd88f4cfc7f31bfd53f1b7615aa08df1c4137f4d795")
 
 print(f"\n{ok_count} OK, {fail_count} FAIL")

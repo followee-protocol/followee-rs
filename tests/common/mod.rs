@@ -99,8 +99,62 @@ pub fn b5_body() -> RecordBody {
     }
 }
 
+/// The Appendix B.9 Bob timestamp.
+pub const B9_TIMESTAMP_MS: u64 = 1_785_589_201_123;
+
+pub fn bob_did() -> FolloweeDid {
+    FolloweeDid::parse(&fx_str("bob_did")).expect("Bob DID parses")
+}
+
+pub fn bob_contact() -> ContactDocument {
+    ContactDocument {
+        display_name: Some("Bob Example".to_owned()),
+        summary: Some("Reader".to_owned()),
+        also_known_as: vec!["acct:bob@example.net".to_owned()],
+        services: vec![ServiceEntry {
+            id: "feed".to_owned(),
+            service_type: "Feed".to_owned(),
+            endpoint: "https://bob.example/feed.xml".to_owned(),
+            media_type: Some("application/atom+xml".to_owned()),
+            label: Some("Reading".to_owned()),
+            language: None,
+            rel: None,
+        }],
+        ..ContactDocument::default()
+    }
+}
+
+pub fn bob_descriptor() -> AuthorityDescriptor {
+    AuthorityDescriptor {
+        root_key: fx32("bob_root_public_key"),
+        revocation_commitment: fx32("bob_revocation_commitment"),
+    }
+}
+
+/// The Appendix B.9 Bob record body from structured input.
+pub fn b9_body() -> RecordBody {
+    RecordBody {
+        id: bob_did(),
+        timestamp_ms: B9_TIMESTAMP_MS,
+        authority: Authority::Root,
+        descriptor: bob_descriptor(),
+        revocation_key: None,
+        valid_until_ms: None,
+        contact: bob_contact(),
+        extensions: Default::default(),
+    }
+}
+
 pub fn root_seed() -> [u8; 32] {
     fx32("root_seed")
+}
+
+pub fn bob_root_seed() -> [u8; 32] {
+    fx32("bob_root_seed")
+}
+
+pub fn bob_revocation_seed() -> [u8; 32] {
+    fx32("bob_revocation_seed")
 }
 
 pub fn revocation_seed() -> [u8; 32] {
@@ -226,6 +280,84 @@ pub fn alice_contact_raw() -> Vec<u8> {
         (r_uint(3), r_array(&[r_tstr("acct:alice@example.com")])),
         (r_uint(4), r_array(&[service])),
     ])
+}
+
+/// Counts one CBOR item's aggregate members — every map entry plus every
+/// array element, recursively — per the specification section 15.1 counting
+/// rule. Deliberately test-side and independent of the crate validator, so
+/// derivations from this counter are not produced by the code under test.
+/// Panics on input the r_* emitters cannot produce.
+pub fn count_members(bytes: &[u8]) -> u32 {
+    fn item(b: &[u8], pos: &mut usize, members: &mut u32) {
+        let ib = b[*pos];
+        *pos += 1;
+        let (major, ai) = (ib >> 5, ib & 0x1f);
+        let arg: u64 = match ai {
+            0..=23 => u64::from(ai),
+            24 => {
+                let v = u64::from(b[*pos]);
+                *pos += 1;
+                v
+            }
+            25 => {
+                let v = u64::from(u16::from_be_bytes([b[*pos], b[*pos + 1]]));
+                *pos += 2;
+                v
+            }
+            26 => {
+                let v = u64::from(u32::from_be_bytes(b[*pos..*pos + 4].try_into().unwrap()));
+                *pos += 4;
+                v
+            }
+            27 => {
+                let v = u64::from_be_bytes(b[*pos..*pos + 8].try_into().unwrap());
+                *pos += 8;
+                v
+            }
+            _ => panic!("unsupported additional information {ai}"),
+        };
+        match major {
+            0 | 1 | 7 => {}
+            2 | 3 => *pos += arg as usize,
+            4 => {
+                for _ in 0..arg {
+                    *members += 1;
+                    item(b, pos, members);
+                }
+            }
+            5 => {
+                for _ in 0..arg {
+                    *members += 1;
+                    item(b, pos, members);
+                    item(b, pos, members);
+                }
+            }
+            6 => item(b, pos, members),
+            _ => panic!("unsupported major {major}"),
+        }
+    }
+    let mut pos = 0;
+    let mut members = 0;
+    item(bytes, &mut pos, &mut members);
+    assert_eq!(pos, bytes.len(), "exactly one complete item");
+    members
+}
+
+/// Builds one Appendix B.10 raw record body: the B.4 body with its map head
+/// changed from `a6` to `a7` and record label `8` plus the exact extension
+/// bytes appended. The appended bytes are reconstructed from parts (label,
+/// extension-map head, key, value) rather than sliced from spec hex.
+pub fn b10_raw_body(extension_value_bytes: &[u8]) -> Vec<u8> {
+    let mut body = r_map(&b4_raw_entries());
+    assert_eq!(body[0], 0xa6, "B.4 body head");
+    body[0] = 0xa7;
+    body.extend(r_uint(8));
+    // Extension map: one entry keyed by the B.10 URI; the value bytes are
+    // supplied raw because they are deliberately invalid CBOR content.
+    body.extend(r_head(5, 1));
+    body.extend(r_tstr(&fx_str("b10_extension_key")));
+    body.extend_from_slice(extension_value_bytes);
+    body
 }
 
 /// Assembles a complete tagged envelope from raw parts with an arbitrary

@@ -240,6 +240,188 @@ fn sec_b7_item14_s_plus_l_signature_is_rejected_by_production_path() {
 }
 
 #[test]
+fn sec_b9_bob_keys_commitment_descriptor_and_did_reproduce() {
+    assert_eq!(
+        crypto::ed25519_public_key(&bob_root_seed()),
+        fx32("bob_root_public_key")
+    );
+    assert_eq!(
+        crypto::ed25519_public_key(&bob_revocation_seed()),
+        fx32("bob_revocation_public_key")
+    );
+    assert_eq!(
+        encode_public_key(&fx32("bob_revocation_public_key")),
+        fx_bytes("bob_revocation_public_key_cbor")
+    );
+    assert_eq!(
+        revocation_commitment(&fx32("bob_revocation_public_key")),
+        fx32("bob_revocation_commitment")
+    );
+    let descriptor = bob_descriptor();
+    assert_eq!(descriptor.encode(), fx_bytes("bob_descriptor_cbor"));
+    let did = descriptor.did();
+    assert_eq!(did.as_str(), fx_str("bob_did"));
+    assert_eq!(did.digest(), &fx32("bob_descriptor_digest"));
+    let mut multihash = vec![0x12, 0x20];
+    multihash.extend_from_slice(did.digest());
+    assert_eq!(multihash, fx_bytes("bob_multihash_bytes"));
+}
+
+#[test]
+fn sec_b9_bob_record_reproduces_byte_for_byte_and_verifies() {
+    let body = b9_body();
+    let body_bytes = body.encode().expect("B.9 body encodes");
+    assert_eq!(body_bytes, fx_bytes("bob_record_body"), "record body CBOR");
+    let sig_structure = followee::sig_structure(&body_bytes);
+    assert_eq!(
+        sig_structure,
+        fx_bytes("bob_sig_structure"),
+        "Sig_structure bytes"
+    );
+    assert_eq!(
+        sig_structure.len() as u64,
+        fixtures()["bob_sig_structure_length"]
+            .as_u64()
+            .expect("stated length"),
+        "stated Sig_structure length"
+    );
+    assert_eq!(crypto::sha256(&body_bytes), fx32("bob_body_digest"));
+    let envelope = sign_record(&body, &bob_root_seed()).expect("B.9 signs");
+    assert_eq!(envelope, fx_bytes("bob_envelope"), "complete envelope");
+    assert_eq!(
+        &envelope[envelope.len() - 64..],
+        fx_bytes("bob_signature").as_slice()
+    );
+    let verified = verify_record(&bob_did(), &envelope).expect("published B.9 envelope verifies");
+    assert_eq!(verified.body(), &body);
+    assert_eq!(verified.body_digest(), &fx32("bob_body_digest"));
+}
+
+#[test]
+fn sec_b9_records_bind_to_their_own_did_only() {
+    // Alice's envelope is not a candidate for Bob and vice versa: every
+    // cross-target verification fails identity binding.
+    assert_eq!(
+        verify_record(&bob_did(), &fx_bytes("root_record_envelope")),
+        Err(VerifyError::IdentityBindingMismatch)
+    );
+    assert_eq!(
+        verify_record(&alice_did(), &fx_bytes("bob_envelope")),
+        Err(VerifyError::IdentityBindingMismatch)
+    );
+}
+
+/// Builds the exact extension-value bytes for one Appendix B.10 case from its
+/// structured description (never sliced from spec hex).
+fn b10_value_bytes(name: &str) -> Vec<u8> {
+    match name {
+        // Nested extension object {0: 0, 0: 1}: two adjacent deterministic
+        // encodings of integer key 0.
+        "duplicate_key" => r_map(&[(r_uint(0), r_uint(0)), (r_uint(0), r_uint(1))]),
+        // Text strings whose declared lengths exactly cover the invalid
+        // UTF-8 payloads, so the CBOR item is complete and the code point is
+        // the only fault.
+        "overlong" => {
+            let mut v = r_head(3, 2);
+            v.extend([0xc0, 0xae]); // overlong U+002E
+            v
+        }
+        "surrogate" => {
+            let mut v = r_head(3, 3);
+            v.extend([0xed, 0xa0, 0x80]); // lone U+D800
+            v
+        }
+        "above_max" => {
+            let mut v = r_head(3, 4);
+            v.extend([0xf4, 0x90, 0x80, 0x80]); // U+110000
+            v
+        }
+        "incomplete" => {
+            let mut v = r_head(3, 2);
+            v.extend([0xe2, 0x82]); // first two bytes of a three-byte point
+            v
+        }
+        other => panic!("unknown B.10 case {other}"),
+    }
+}
+
+#[test]
+fn sec_b10_fault_isolated_bodies_reproduce_and_fail_exactly_invalid_cbor() {
+    let cases = fixtures()["b10_cases"]
+        .as_array()
+        .expect("b10_cases present")
+        .clone();
+    assert_eq!(cases.len(), 5, "five normative B.10 vectors");
+    for case in cases {
+        let name = case["name"].as_str().expect("name");
+        let hex =
+            |field: &str| hex::decode(case[field].as_str().expect("hex field")).expect("valid hex");
+
+        // Reconstruct the raw body from structured parts and prove the
+        // appended portion equals the published appended bytes.
+        let body = b10_raw_body(&b10_value_bytes(name));
+        let mut expected_appended = r_uint(8);
+        expected_appended.extend(r_head(5, 1));
+        expected_appended.extend(r_tstr(&fx_str("b10_extension_key")));
+        expected_appended.extend(b10_value_bytes(name));
+        assert_eq!(
+            expected_appended,
+            hex("appended_bytes"),
+            "{name}: appended bytes"
+        );
+        assert!(body.ends_with(&expected_appended), "{name}: body suffix");
+        assert_eq!(
+            crypto::sha256(&body).as_slice(),
+            hex("body_digest"),
+            "{name}: body digest"
+        );
+
+        // The stated Sig_structure length and the published signature both
+        // reproduce; the signature is valid under Alice's legitimate root
+        // key at the primitive boundary.
+        let sig_structure = followee::sig_structure(&body);
+        assert_eq!(
+            sig_structure.len() as u64,
+            case["sig_structure_length"].as_u64().expect("length"),
+            "{name}: Sig_structure length"
+        );
+        let signature = followee::crypto::ed25519_sign(&root_seed(), &sig_structure);
+        assert_eq!(
+            signature.as_slice(),
+            hex("signature"),
+            "{name}: re-signature matches the published bytes"
+        );
+        assert!(
+            crypto::verify_followee_ed25519(&fx32("root_public_key"), &sig_structure, &signature),
+            "{name}: signature verifies under Alice's root key"
+        );
+
+        // The complete envelope fails exactly with invalidCbor through the
+        // production record path: not invalidSignature, schemaViolation, or
+        // nonDeterministicCbor.
+        assert_eq!(case["expected_error"].as_str(), Some("invalidCbor"));
+        let envelope = seal(&body, &root_seed());
+        assert_eq!(
+            verify_record(&alice_did(), &envelope),
+            Err(VerifyError::InvalidCbor),
+            "{name}: exact classification through verify_record"
+        );
+
+        // The same classification is visible through the public bounded
+        // validator over the raw body.
+        assert_eq!(
+            followee::validate_cbor(
+                &body,
+                followee::limits::MAX_BODY_DEPTH,
+                followee::limits::MAX_BODY_MEMBERS
+            ),
+            Err(VerifyError::InvalidCbor),
+            "{name}: exact classification through validate_cbor"
+        );
+    }
+}
+
+#[test]
 fn sec_20_4_structured_input_determinism_across_runs() {
     // Byte-identical output from identical structured input, repeatedly.
     let first = b4_body().encode().expect("encodes");

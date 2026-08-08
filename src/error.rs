@@ -14,10 +14,13 @@ pub enum VerifyError {
     /// Envelope exceeds the 16 KiB hard cap.
     #[error("record exceeds the 16 KiB envelope limit")]
     RecordTooLarge,
-    /// CBOR cannot be parsed safely.
-    #[error("CBOR cannot be parsed safely")]
+    /// Input is not well-formed CBOR, or is well-formed but not basically
+    /// valid under RFC 8949 (section 6.1.1), including invalid UTF-8 text
+    /// strings and duplicate map keys.
+    #[error("input is not well-formed or basically valid CBOR")]
     InvalidCbor,
-    /// Encoding violates the section 6.1 deterministic profile.
+    /// Basically valid CBOR that violates the section 6.1.2 deterministic or
+    /// restricted Followee profile.
     #[error("encoding violates the deterministic CBOR profile")]
     NonDeterministicCbor,
     /// Parsed object violates its v1 schema or limits.

@@ -3,7 +3,7 @@
 Ambiguities identified in the normative specification
 (`followee-protocol/followee`), tracked against the pinned commit in
 IMPLEMENTATION.md section 2 (currently
-`abc9a55d90f1026e6509207abda73e5dc6d14241`, specification v0.7). Per
+`610f9a1e78d860e8bd685ef1435a53a16f1221ec`, specification v0.8). Per
 IMPLEMENTATION.md section 2, questions are resolved in the protocol repository
 — never silently in this implementation — and no milestone may pass while an
 open question affects code delivered by that milestone. Resolving a question
@@ -11,7 +11,7 @@ that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
 **All recorded questions are resolved**, and every resolution remains in
-force in specification v0.7 at the pinned commit. Each resolved entry cites
+force in specification v0.8 at the pinned commit. Each resolved entry cites
 the amending version and records the test obligation the resolution creates.
 
 ---
@@ -225,3 +225,104 @@ clean-room review) changed two Milestone 1 obligations.
 `sec_7_2_rejects_every_relative_reference_form`,
 `sec_b7_item17_descriptor_label_0_as_false` (+ three sibling cases),
 `boolean_labels_rejected_in_every_other_fixed_label_map`.
+
+## SQ-11 — CBOR basic-validity taxonomy: `invalidCbor` vs `nonDeterministicCbor` for duplicate keys and invalid UTF-8
+
+**Status:** resolved (spec v0.8, commit `610f9a1`) · **Affected:** Milestone 1 · **Spec:** sections 6.1.1–6.1.3, 15.3, 20.1; Appendix B.7 items 9/18; Appendix B.10
+
+Specification v0.7 folded duplicate map keys and UTF-8 validity into the
+single section 6.1 deterministic-profile list, making their wire
+classification ambiguous between `invalidCbor` ("CBOR cannot be parsed
+safely") and `nonDeterministicCbor` ("encoding violates section 6.1"), and
+independent implementations classified them differently. Resolved by the
+v0.8 amendment, which splits section 6.1 into three successive layers:
+
+1. **6.1.1 well-formedness and basic validity** (RFC 8949 sections 5.3/5.6):
+   duplicate map keys under generic-data-model key equivalence and invalid
+   RFC 3629 UTF-8 produce exact `invalidCbor`. Key equivalence is by data
+   model — differently serialized encodings of one value are one key, while
+   values of different types (unsigned `0` versus `false`) stay distinct.
+   After deterministic-profile acceptance, comparing received encodings is
+   an equivalent implementation of the duplicate check.
+2. **6.1.2 deterministic profile**: non-minimal or indefinite encodings,
+   misordered keys, tags, floats, and `undefined` on basically valid items
+   produce `nonDeterministicCbor`.
+3. **6.1.3 schema and multiple faults**: specific assigned errors, with
+   `schemaViolation` as the fallback; multi-fault inputs have an
+   unspecified exact error unless a normative rule assigns precedence.
+
+Appendix B.10 fixes five fault-isolated `invalidCbor` vectors (one adjacent
+duplicate key, four invalid-UTF-8 mutations), each re-signed by Alice's
+legitimate root key; B.7 gains item 18 and the note that the unprotected-
+header form of item 9 is multi-fault. Implemented by reclassifying duplicate
+keys from `NonDeterministic` to `Invalid` in `src/cbor.rs` (invalid UTF-8
+already classified `Invalid`).
+
+**Test obligations (Milestone 1, done):**
+`cbor::tests::sec_6_1_1_rejects_duplicate_map_keys_as_invalid`,
+`sec_6_1_1_key_equivalence_is_data_model_typed`,
+`sec_6_1_1_rejects_every_rfc_3629_utf8_exclusion_as_invalid`,
+`conformance::sec_b10_fault_isolated_bodies_reproduce_and_fail_exactly_invalid_cbor`,
+`negative_b7::sec_b7_item9_duplicate_map_key_is_invalid_cbor`,
+`sec_b7_item9_duplicate_unprotected_header_keys_reject_unspecified`,
+`validate_cbor_api::sec_6_1_1_*` / `sec_6_1_2_*`.
+
+## SQ-12 — Byte-string opacity: does CBOR validation recurse into byte-string contents?
+
+**Status:** resolved (spec v0.8, commit `610f9a1`) · **Affected:** Milestones 1, 3, 4 · **Spec:** sections 6.1.1, 8.1, 12.1; Appendix A note
+
+Whether a validator must (or may) recursively interpret byte-string contents
+that happen to contain CBOR — in particular Identity Record envelopes carried
+as relay `Full` byte strings, and the record payload inside the COSE
+envelope — was unstated. Resolved by the v0.8 amendment: basic-validity
+recursion stops at byte-string boundaries; byte-string contents are opaque to
+the enclosing item and MUST NOT be recursively interpreted. The outer COSE
+item and the attached record body have separate CBOR boundaries, and a
+candidate's invalidity never retroactively invalidates an accepted enclosing
+wrapper. Section 22 freezes the opacity boundary.
+
+**Test obligations (Milestone 1, done):**
+`cbor::tests::sec_6_1_1_byte_string_contents_are_opaque`,
+`validate_cbor_api::sec_6_1_1_key_equivalence_is_typed_and_byte_strings_are_opaque`,
+`b11_vectors::sec_b11_3_resolve_candidate_isolation_bytes_reproduce` (wrapper
+accepts while the embedded B.8 candidate fails section 8.1). Relay/client
+behavioural halves are Milestone 3/4 obligations.
+
+## SQ-13 — Relay batch isolation: outer CBOR faults, per-DID faults, and duplicate request DIDs
+
+**Status:** resolved (spec v0.8, commit `610f9a1`) · **Affected:** Milestone 3 (behaviour); Milestone 1 (byte reproduction) · **Spec:** sections 12.1, 12.3, 15.4, 20.2; Appendix B.11.1/B.11.3/B.11.4/B.11.6
+
+v0.7 said servers "SHOULD use 400 for malformed outer requests" without
+fixing the boundary between outer-request CBOR faults and per-item protocol
+faults, whether duplicate requested DIDs may be deduplicated, or how an
+invalid opaque Full candidate affects neighbouring results. Resolved by the
+v0.8 amendment: an outer CBOR-layer fault means protocol processing did not
+begin (HTTP `400`, no per-item results); a syntactically malformed DID as
+valid UTF-8 inside a valid batch is protocol input (HTTP `200`, aligned
+per-DID `Error(invalidDid)`); duplicate DIDs are never deduplicated,
+reordered, combined, or omitted and response cardinality must equal request
+cardinality; and a failed Full candidate is discarded alone, without
+shifting positions or becoming Absent. Appendix B.11 publishes the exact
+wrapper bytes and digests.
+
+**Test obligations:** Milestone 1 byte reproduction done
+(`b11_vectors::sec_b11_1/3/4/6_*`); HTTP and client behaviours are
+Milestone 3/4 acceptance gates (IMPLEMENTATION.md section 13).
+
+## SQ-14 — Synchronization cursor progress despite rejected candidates
+
+**Status:** resolved (spec v0.8, commit `610f9a1`) · **Affected:** Milestone 4 (behaviour); Milestone 1 (byte reproduction) · **Spec:** sections 12.6, 13.3, 16.16, 20.2; Appendix B.11.5/B.11.7
+
+v0.7 did not state whether a receiver that rejects a Full candidate from an
+accepted `changes` response advances the peer cursor, nor bound a success
+response's entry count by the request's `itemLimit`. Resolved by the v0.8
+amendment: the receiver stores the returned `nextCursor` regardless of how
+many candidates it admitted (rejection never stalls the cursor or re-requests
+the range), while an over-`itemLimit` success response is rejected completely
+— no entry processing, no state change, no cursor use. Section 16.16 records
+the resulting liveness/convergence trade. Appendix B.11.5 and B.11.7 publish
+the exact request/response bytes, cursor values, and digests.
+
+**Test obligations:** Milestone 1 byte reproduction done
+(`b11_vectors::sec_b11_5/7_*`); receiver behaviours are Milestone 4
+acceptance gates (IMPLEMENTATION.md section 13).

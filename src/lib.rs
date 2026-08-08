@@ -38,18 +38,24 @@ pub use cose::sig_structure;
 /// (specification section 6.1) within the requested nesting-depth and
 /// total-member limits, with no trailing bytes.
 ///
-/// This is structural validation only: it checks the deterministic encoding
-/// profile (definite lengths, minimal encodings, bytewise map-key ordering,
-/// no duplicates, no tags, floats, `undefined`, or reserved simples, valid
-/// UTF-8) under explicit limits. It performs **no** Followee record-schema
-/// check; use [`verify::verify_record`] for complete Identity Record
-/// verification.
+/// This is structural validation only: it checks well-formedness, RFC 8949
+/// basic validity, and the deterministic encoding profile (definite lengths,
+/// minimal encodings, bytewise map-key ordering, no tags, floats,
+/// `undefined`, or reserved simples) under explicit limits. It performs
+/// **no** Followee record-schema check; use [`verify::verify_record`] for
+/// complete Identity Record verification.
 ///
-/// Classification follows the section 15.3 vocabulary: malformed, truncated,
-/// or unsupported structure is [`error::VerifyError::InvalidCbor`];
-/// non-minimal or indefinite encodings and duplicate or misordered map keys
-/// are [`error::VerifyError::NonDeterministicCbor`]; exceeding a requested
-/// limit is [`error::VerifyError::SchemaViolation`].
+/// Classification follows the section 6.1 layers and section 15.3
+/// vocabulary: input that is not well-formed, or is well-formed but not
+/// basically valid — duplicate map keys under generic-data-model key
+/// equivalence, or invalid RFC 3629 UTF-8 — is
+/// [`error::VerifyError::InvalidCbor`]; basically valid input with
+/// non-minimal or indefinite encodings, misordered map keys, or
+/// profile-forbidden items is [`error::VerifyError::NonDeterministicCbor`];
+/// exceeding a requested limit is [`error::VerifyError::SchemaViolation`].
+/// Validation recurses through arrays and maps and stops at byte-string
+/// boundaries; byte-string contents are opaque and never reinterpreted as
+/// CBOR.
 ///
 /// Followee v1 defines no context requiring limits beyond
 /// [`limits::MAX_BODY_DEPTH`] and [`limits::MAX_BODY_MEMBERS`]. Requested

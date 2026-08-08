@@ -247,13 +247,33 @@ fn sec_b7_item8_reordered_map_keys_are_non_deterministic() {
 }
 
 #[test]
-fn sec_b7_item9_duplicate_map_key_is_non_deterministic() {
+fn sec_b7_item9_duplicate_map_key_is_invalid_cbor() {
+    // Adjacent identical deterministic encodings of body label 0: a basic-
+    // validity fault under specification v0.8 section 6.1.1, classified
+    // invalidCbor (the fault-isolated normative construction is B.10's
+    // nested duplicate; this body-level twin is re-signed so duplication is
+    // its only fault).
     let mut entries = b4_raw_entries();
     entries.insert(1, (r_uint(0), r_uint(1)));
     let envelope = seal(&r_map(&entries), &root_seed());
-    assert_eq!(
-        verify_alice(&envelope),
-        Err(VerifyError::NonDeterministicCbor)
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::InvalidCbor));
+}
+
+#[test]
+fn sec_b7_item9_duplicate_unprotected_header_keys_reject_unspecified() {
+    // The B.7 note: replacing the required empty unprotected map with a map
+    // containing duplicate keys independently violates section 6.1.1 basic
+    // validity and section 6.2 rule 4. Fault profile multiple; the exact
+    // symbol is unspecified, so only rejection is asserted. No re-signing is
+    // needed: the unprotected map is outside the Sig_structure.
+    let envelope = fx_bytes("root_record_envelope");
+    let mut mutated = envelope[..6].to_vec();
+    // {1: 0, 1: 0} in place of the empty map a0.
+    mutated.extend_from_slice(&[0xa2, 0x01, 0x00, 0x01, 0x00]);
+    mutated.extend_from_slice(&envelope[7..]);
+    assert!(
+        verify_alice(&mutated).is_err(),
+        "rejected; the exact symbol is normatively unspecified"
     );
 }
 
@@ -311,6 +331,10 @@ fn sec_b7_item13_single_flipped_signature_bit_is_invalid_signature() {
 
 // Item 14 (S >= L) lives in tests/conformance.rs against the published
 // constant; the remaining primitive cases live in tests/primitive_ed25519.rs.
+// Item 18 (invalid RFC 3629 UTF-8 in signed bodies, re-signed by Alice's
+// root key) is covered by the four normative Appendix B.10 UTF-8 vectors in
+// tests/conformance.rs (`sec_b10_fault_isolated_bodies_…`), each asserting
+// exact `invalidCbor`.
 
 #[test]
 fn sec_b7_item15_valid_until_before_timestamp_is_rejected() {
@@ -426,6 +450,76 @@ fn sec_b7_item16_service_count_boundary() {
     // members: 64 * 4 + overhead ≈ 258 > 256, so the at-limit case uses the
     // member budget instead. The over-limit case must still fail.
     assert_eq!(verify_alice(&make(65)), Err(VerifyError::SchemaViolation));
+}
+
+#[test]
+fn sec_15_1_effective_service_maxima_derive_to_61_root_and_60_root_revoked() {
+    // Specification section 15.1: the 256-member aggregate budget, not the
+    // 64-entry collection cap, bounds how many minimal services a complete
+    // record can carry. Derive the effective maxima from the normative
+    // member-counting rule (every map entry plus every array element,
+    // counted by the independent test-side counter) and the current record
+    // schemas; 61 and 60 are asserted as computed results, never used as
+    // inputs to the derivation.
+    let minimal_contact = |n: usize| {
+        let service = |i: usize| {
+            r_map(&[
+                (r_uint(0), r_tstr(&format!("s{i}"))),
+                (r_uint(1), r_tstr("Website")),
+                (r_uint(2), r_tstr(&format!("https://example.com/{i}"))),
+            ])
+        };
+        let services: Vec<_> = (0..n).map(service).collect();
+        r_map(&[(r_uint(4), r_array(&services))])
+    };
+    let root_body = |n: usize| {
+        let mut entries = b4_raw_entries();
+        entries[5].1 = minimal_contact(n); // label 7
+        r_map(&entries)
+    };
+    let revoked_body = |n: usize| {
+        let mut entries = b5_raw_entries();
+        entries[6].1 = minimal_contact(n); // label 7
+        r_map(&entries)
+    };
+
+    let budget = followee::limits::MAX_BODY_MEMBERS;
+    let per_service = count_members(&minimal_contact(1)) - count_members(&minimal_contact(0));
+    assert_eq!(
+        per_service, 4,
+        "one array member plus three map members per minimal service"
+    );
+    let n_root = (budget - count_members(&root_body(0))) / per_service;
+    let n_revoked = (budget - count_members(&revoked_body(0))) / per_service;
+    assert_eq!(n_root, 61, "computed effective Root maximum");
+    assert_eq!(n_revoked, 60, "computed effective RootRevoked maximum");
+
+    // Admission at each computed N and aggregate-limit rejection at N + 1,
+    // through the production record path. The 64-entry collection cap is
+    // not the operative limit at either boundary.
+    assert!((n_root as usize) < 64 && (n_revoked as usize) < 64);
+    let root_at = seal(&root_body(n_root as usize), &root_seed());
+    assert!(
+        verify_alice(&root_at).is_ok(),
+        "Root record with {n_root} minimal services verifies"
+    );
+    let root_over = seal(&root_body(n_root as usize + 1), &root_seed());
+    assert_eq!(
+        verify_alice(&root_over),
+        Err(VerifyError::SchemaViolation),
+        "one more service breaks the aggregate member budget"
+    );
+
+    let revoked_at = seal(&revoked_body(n_revoked as usize), &revocation_seed());
+    assert!(
+        verify_alice(&revoked_at).is_ok(),
+        "RootRevoked record with {n_revoked} minimal services verifies"
+    );
+    let revoked_over = seal(&revoked_body(n_revoked as usize + 1), &revocation_seed());
+    assert_eq!(
+        verify_alice(&revoked_over),
+        Err(VerifyError::SchemaViolation)
+    );
 }
 
 #[test]

@@ -2,9 +2,9 @@
   "_provenance": {
     "description": "Construction provenance for the executable Appendix B.7 negative conformance cases in tests/negative_b7.rs and tests/conformance.rs",
     "derivation_status": "implementation",
-    "spec_version": "v0.7",
-    "pinned_commit": "abc9a55d90f1026e6509207abda73e5dc6d14241",
-    "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14, and 17; the identityBindingMismatch symbol is normative as of specification v0.4). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations."
+    "spec_version": "v0.8",
+    "pinned_commit": "610f9a1e78d860e8bd685ef1435a53a16f1221ec",
+    "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14, and 17; the identityBindingMismatch symbol is normative as of specification v0.4, and the section 6.1.1/6.1.2 split fixing items 7-9 is normative as of specification v0.8). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations. The five Appendix B.10 basic-validity vectors are specification-status material recorded in fixtures/specification/appendix_b.json, not here."
   },
   "cases": [
     {
@@ -244,8 +244,24 @@
       "expected": {
         "accepted": false,
         "errorAssertion": "exact",
-        "error": "nonDeterministicCbor"
-      }
+        "error": "invalidCbor"
+      },
+      "note": "re-signed body-level twin of the fault-isolated Appendix B.10 adjacent-duplicate vector; specification v0.8 section 6.1.1 reclassifies duplicate map keys from the deterministic profile to basic validity, so the exact error is invalidCbor (previously nonDeterministicCbor under v0.7)"
+    },
+    {
+      "id": "b7-9b-duplicate-unprotected-header-keys",
+      "baseVector": "B.4",
+      "mutation": "required empty COSE unprotected map replaced with {1: 0, 1: 0}",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": false,
+      "resigned": false,
+      "signingKey": null,
+      "faultProfile": "multiple",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      },
+      "note": "per the specification v0.8 Appendix B.7 note, this form independently violates section 6.1.1 basic validity and section 6.2 rule 4, so only rejection is portable; the test asserts rejection without pinning a symbol"
     },
     {
       "id": "b7-10-root-with-label-5",
@@ -437,6 +453,21 @@
         "errorAssertion": "exact",
         "error": "schemaViolation"
       }
+    },
+    {
+      "id": "b7-16d-effective-service-maxima",
+      "baseVector": "B.4 / B.5",
+      "mutation": "contact replaced with N (admission) or N+1 (rejection) minimal three-member services, where N is derived at test time from the section 15.1 aggregate member-counting rule and the current record schemas by an independent test-side member counter; the computed N is asserted to equal 61 for Root and 60 for RootRevoked rather than being supplied as an input",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed (Root) / B.2 revocation seed (RootRevoked)",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "unspecified"
+      },
+      "note": "the N+1 constructions keep every per-field and per-collection value within its own cap (62 and 61 services are under the 64-entry limit) so the aggregate member budget is the only operative fault; the tests additionally assert this implementation's schemaViolation classification, which section 6.1.3 names as the fallback for limit failures with no more specific assigned error"
     }
   ]
 }
