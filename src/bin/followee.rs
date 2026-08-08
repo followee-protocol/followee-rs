@@ -1,16 +1,22 @@
-//! Placeholder binary for the eventual `followee` command-line client.
+//! The `followee` command-line client (IMPLEMENTATION.md section 8).
 //!
-//! The CLI surface is a Milestone 2 deliverable (IMPLEMENTATION.md section 8).
-//! Until then this stub only reports that no protocol behaviour exists, and
-//! exits nonzero so scripts cannot mistake it for a working tool.
+//! This binary is a thin shim: all behaviour lives in [`followee::cli`],
+//! which receives the operating-system clock and CSPRNG here and
+//! deterministic implementations in tests.
 
+use followee::clock::SystemClock;
+use followee::random::OsRandom;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    eprintln!(
-        "followee {} (Milestone 0 scaffold): no protocol behaviour is implemented yet.",
-        env!("CARGO_PKG_VERSION")
-    );
-    eprintln!("See IMPLEMENTATION.md for the milestone plan.");
-    ExitCode::from(2)
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut stdout = std::io::stdout().lock();
+    let mut stderr = std::io::stderr().lock();
+    ExitCode::from(followee::cli::run(
+        &args,
+        &OsRandom,
+        &SystemClock,
+        &mut stdout,
+        &mut stderr,
+    ))
 }

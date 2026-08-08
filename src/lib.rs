@@ -3,9 +3,12 @@
 //! Non-normative Rust implementation of the Followee DID method and relay
 //! protocol.
 //!
-//! **Status: Milestone 1 (protocol core) in progress.** This crate implements
-//! the Followee v1 identifier, deterministic CBOR, COSE, strict Ed25519
-//! verification, record schemas, signing, and ordering rules. No relay,
+//! **Status: Milestone 2 (authoring and inspection CLI) in progress.** This
+//! crate implements the Followee v1 identifier, deterministic CBOR, COSE,
+//! strict Ed25519 verification, record schemas, signing, and ordering rules,
+//! plus the [`cli`] module backing the `followee` binary: identity creation,
+//! record signing and revocation, verification, inspection, deterministic
+//! selection, JSON authoring, and safe local test-key storage. No relay,
 //! resolver, HTTP, or storage code exists yet.
 //!
 //! The normative authority for protocol behaviour is the pinned Followee
@@ -19,6 +22,7 @@
 //! interoperability testing.
 
 mod cbor;
+pub mod cli;
 pub mod clock;
 pub mod contact;
 mod cose;
@@ -92,5 +96,14 @@ pub mod fuzzing {
     /// routed through the public wrapper so one structural gate exists.
     pub fn validate_cbor(bytes: &[u8]) -> bool {
         crate::validate_cbor(bytes, MAX_BODY_DEPTH, MAX_BODY_MEMBERS).is_ok()
+    }
+
+    /// Parses arbitrary bytes as authoring-format contact JSON
+    /// (IMPLEMENTATION.md section 7.5): must never panic, hang, or allocate
+    /// unboundedly.
+    pub fn parse_contact_json(bytes: &[u8]) {
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            let _ = crate::cli::json::contact_from_json(text);
+        }
     }
 }

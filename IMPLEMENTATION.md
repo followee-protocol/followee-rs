@@ -269,7 +269,7 @@ Requirements:
 - new secret files use owner-only permissions where the operating system supports them;
 - existing files are never overwritten without an explicit flag;
 - secrets never appear in normal logs, error messages, shell examples or JSON diagnostics;
-- production commands reject exact matches for all published Appendix B secret seeds: both B.2 root and revocation seeds and both B.8 attacker root and revocation seeds;
+- production commands reject exact matches for all published Appendix B secret seeds: both B.2 root and revocation seeds, both B.8 attacker root and revocation seeds, and both B.9 Bob root and revocation seeds;
 - secret buffers are zeroised where practical; and
 - the CLI prominently warns that local files are demonstration custody, not a production vault.
 

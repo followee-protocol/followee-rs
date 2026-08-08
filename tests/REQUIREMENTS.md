@@ -1,9 +1,11 @@
-# Requirement traceability (Milestone 1)
+# Requirement traceability (Milestones 1 and 2)
 
 Mapping from testable MUST/MUST NOT requirements in the implemented
 specification sections (pinned commit in IMPLEMENTATION.md §2) to tests.
 Unit tests live in `src/<module>.rs`; integration tests in `tests/<file>.rs`.
-This map covers sections 3–8 and Appendix B; relay, resolver, WebFinger and
+This map covers sections 3–8 and Appendix B (Milestone 1) and the CLI
+authoring, custody, and inspection obligations from IMPLEMENTATION.md
+sections 7.4, 7.5, 8, and 13 (Milestone 2); relay, resolver, WebFinger and
 DID-document-projection sections arrive with their milestones.
 
 | Spec | Requirement | Tests |
@@ -55,6 +57,31 @@ DID-document-projection sections arrive with their milestones.
 | IMPL §6.2 | Sole strict entry point; wiring delegation with exact key/message/signature; mechanical call restriction | `verify::wiring_tests::*`, `lint_guard::*`, `clippy.toml` + CI `-D warnings` |
 | IMPL §7.3 | Checked arithmetic; injected clock/randomness | `clock::tests::*`, `random::tests::*`, crate-wide `arithmetic_side_effects = "deny"` |
 | Conformance API | Public `followee::validate_cbor` structural gate: §6.1 profile under explicit limits, §15.3 classifications, limits capped at the Followee maxima, single gate shared with fuzzing and the record path | `validate_cbor_api::*` (nine external tests incl. boundary, zero-limit, over-maxima, and record-path parity cases) |
+
+## Milestone 2: authoring and inspection CLI
+
+| Requirement | Source | Tests |
+| --- | --- | --- |
+| Shell-level flow: create a DID, sign a record, verify it | IMPL §13 M2 acceptance | `cli_shell::milestone_2_acceptance_flow_end_to_end` |
+| Separately stored revocation key creates a winning RootRevoked record | IMPL §13 M2 acceptance; spec §9.4 | `cli_shell::milestone_2_acceptance_flow_end_to_end` (vault-directory custody), `cli::sec_8_2_selection_is_permutation_independent_and_revocation_sticky` |
+| A later Root record cannot be selected after sticky revocation; no last-good-Root fallback | IMPL §13 M2 acceptance; spec §8.2 | `cli_shell::milestone_2_acceptance_flow_end_to_end` (both orders and `--assume-root-revoked`), `cli::sec_8_2_retained_sticky_state_excludes_root_without_a_revoked_candidate` |
+| No ordinary output, diagnostic, error, or failure path reveals secret material; `Debug` redacted; secrets never on command lines | IMPL §7.4, §8 | `cli::impl_7_4_no_output_or_failure_path_reveals_seed_material`, `cli_shell::milestone_2_acceptance_flow_end_to_end` (full-transcript sweep incl. record-file bytes), `cli::keyfile::tests::secret_seed_debug_is_redacted` |
+| Root and revocation secrets in separately named files; identical paths refused | IMPL §7.4 | `cli::impl_7_4_create_refuses_shared_seed_path_and_existing_files` |
+| New secret files owner-only (0600); atomic exclusive creation; forced replacement via owner-only temp + rename | IMPL §7.4 | `cli::keyfile::tests::impl_7_4_write_is_exclusive_owner_only_and_force_replaces_atomically`, `cli_shell` mode asserts |
+| Existing files never overwritten without an explicit flag (secrets and outputs) | IMPL §7.4 | `cli::impl_7_4_create_refuses_shared_seed_path_and_existing_files`, `cli_shell::shell_second_create_refuses_overwrite_and_reports_symbol`, `outputExists` cases |
+| Unsafe existing paths/permissions refused on load: group/other access, symlinks, non-regular files, malformed contents (never echoed) | IMPL §7.4 | `cli::keyfile::tests::impl_7_4_group_or_other_readable_seed_files_are_refused`, `impl_7_4_symlinked_and_non_regular_paths_are_refused`, `impl_7_4_malformed_files_are_refused_without_echoing_contents` |
+| Every published Appendix B seed refused by production signing (B.2, B.8, and B.9 pairs) | IMPL §7.4; spec B.1 | `cli::keyfile::tests::impl_7_4_every_published_appendix_b_seed_is_refused`, `cli::impl_7_4_published_appendix_b_seed_is_refused_by_production_signing` |
+| Seed buffers zeroised where practical | IMPL §7.4 | `SecretSeed` Drop + zeroized intermediates in `keyfile.rs` (review); redaction sweeps prove no observable copies |
+| Prominent demonstration-custody warning; revocation key may go to separate/removable path | IMPL §7.4 | `cli::impl_7_4_create_warns_prominently_about_demonstration_custody`, vault-directory flows |
+| JSON authoring maps unambiguously, rejects unknown fields, enforces every limit before signing, always a complete document | IMPL §7.5 | `cli::json::tests::impl_7_5_*`, `cli::impl_7_5_contact_faults_fail_before_any_signature_exists` (no output file on refusal) |
+| Key generation validates keys (spec §4.4 step 2); deterministic DID from deterministic randomness | spec §4.4; IMPL §7.2/§7.3 | `cli::impl_7_2_identical_randomness_creates_identical_identities`, strict self-check in `identity_create` |
+| Signer timestamp `max(now, previous + 1)`; explicit revocation clock-sanity check | spec §5.3 | `cli::sec_5_3_default_timestamp_is_max_of_now_and_previous_plus_one`, `cli::sec_5_3_revocation_requires_a_sane_clock` |
+| Wrong seed for the authority state refused before signing (root/revocation cross-checks against the identity file) | IMPL §7.4; spec §5.1 | `cli::impl_7_4_wrong_seed_files_fail_with_key_mismatch_before_signing` |
+| `record verify`: exact protocol classification, nonzero exit, time/freshness surfaced | IMPL §8; spec §§5.4, 5.5, 8.1 | `cli::sec_8_1_verify_reports_classification_and_nonzero_exit_on_failure`, `cli::oversized_and_bounded_record_reads_classify_cleanly` |
+| `record inspect` distinguishes raw parsed claims from verified facts and never shows a document as verified when verification was skipped or failed | IMPL §8 | `cli::impl_8_inspect_never_presents_unverified_claims_as_verified` |
+| `record select`: explicit target DID, permutation independence, foreign-DID candidates diagnostic-only | IMPL §7.1, §8 | `cli::sec_8_2_selection_is_permutation_independent_and_revocation_sticky` |
+| Non-interactive commands, machine-readable JSON output, stable symbolic errors, exit statuses 0/1/2 | IMPL §8 | every `cli`/`cli_shell` case asserts JSON shape, symbol, and exit status |
+| Authoring parser never panics on arbitrary input | IMPL §11.5 | `contact_json_parse` fuzz target |
 
 Known intentional gaps at this milestone: relay/resolver behaviour (§§10–14),
 DID Document projection (§9.6), WebFinger (§10), and the remote signer (§18)

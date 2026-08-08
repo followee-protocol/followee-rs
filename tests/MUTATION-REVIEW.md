@@ -1,4 +1,4 @@
-# Mutation-testing review (Milestone 1)
+# Mutation-testing review (Milestones 1 and 2)
 
 `cargo-mutants` runs at milestone gates (IMPLEMENTATION.md section 11.7).
 This document is the review evidence for the Milestone 1 gate: the final
@@ -129,3 +129,23 @@ are pinned by
 `cbor::tests::sec_6_1_2_admits_schema_disallowed_simple_values_as_deterministic`,
 `validate_cbor_api`, the Appendix B.12 exact `schemaViolation` conformance
 suite, and the `negative_b7` item 19 cases.
+
+## Milestone 2 gate (authoring and inspection CLI)
+
+Scoped sweep over every Milestone 2 module (`src/cli/mod.rs`,
+`src/cli/json.rs`, `src/cli/keyfile.rs`, `src/bin/followee.rs`,
+`src/lib.rs`; cargo-mutants v27.1.0, `--jobs 6`). The initial sweep reported
+87 mutants: 71 caught, 10 unviable, 6 missed. One miss was a genuine
+boundary gap and was killed with an added test — the revocation clock-sanity
+floor comparison (`<` at exactly 2020-01-01), now pinned by
+`cli::sec_5_3_revocation_clock_floor_boundary_is_exact`; a confirming sweep
+over `src/cli/mod.rs` reports **32 mutants: 30 caught, 2 unviable, 0
+missed**. The remaining five survivors are individually explained:
+
+| Mutant | Explanation |
+| --- | --- |
+| `src/lib.rs` `fuzzing::parse_contact_json` → `()` | Fuzz-harness glue for the `contact_json_parse` target, exercised by the fuzz smoke rather than `cargo test` — the same documented family as the earlier fuzz entry points. The parser itself is fully covered by `cli::json` unit tests and the CLI suites. |
+| `src/cli/keyfile.rs` `SecretSeed::drop` → `()` | Deliberate defence-in-depth that safe Rust cannot observe: zeroisation on drop erases freed memory, and asserting on freed memory is undefined behaviour. IMPLEMENTATION.md section 7.4 requires zeroisation "where practical"; the practice is established by review, and every observable secret-exposure channel is separately pinned by the redaction sweeps. |
+| `src/cli/keyfile.rs` `open_owner_only_new`, `check_read_safety` ×2 (all in `#[cfg(not(unix))]`) | Platform-conditional fallbacks compiled out on the Unix test platform, so mutations there cannot change tested behaviour. The Unix implementations of the same functions have full mutation coverage (owner-only mode, exclusive create, permission/symlink/regular-file refusals). |
+
+No surviving mutant weakens a normative or security-sensitive branch.

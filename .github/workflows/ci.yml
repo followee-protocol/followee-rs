@@ -72,8 +72,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Protocol-core line coverage (target ≥ 90%)
         # IMPLEMENTATION.md section 11.7: coverage is reported and reviewed;
-        # direct tests per normative branch remain the actual bar. The stub
-        # binary is excluded until the Milestone 2 CLI replaces it.
+        # direct tests per normative branch remain the actual bar. The binary
+        # is a thin shim over followee::cli and runs as a subprocess in the
+        # shell-level tests, which llvm-cov does not instrument in-process.
         run: cargo llvm-cov --locked --all-features --ignore-filename-regex 'src/bin/' --fail-under-lines 90
 
   fuzz-smoke:
@@ -103,3 +104,5 @@ jobs:
         run: cargo +nightly fuzz run cbor_validate --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
       - name: Fuzz record verification
         run: cargo +nightly fuzz run verify_record --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
+      - name: Fuzz contact-JSON authoring parser
+        run: cargo +nightly fuzz run contact_json_parse --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
