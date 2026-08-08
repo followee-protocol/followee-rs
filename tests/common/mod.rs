@@ -343,21 +343,33 @@ pub fn count_members(bytes: &[u8]) -> u32 {
     members
 }
 
-/// Builds one Appendix B.10 raw record body: the B.4 body with its map head
-/// changed from `a6` to `a7` and record label `8` plus the exact extension
-/// bytes appended. The appended bytes are reconstructed from parts (label,
+/// Builds one Appendix B.10/B.12 raw record body: the B.4 body with its map
+/// head changed from `a6` to `a7` and record label `8` plus one extension
+/// entry appended. The appended bytes are reconstructed from parts (label,
 /// extension-map head, key, value) rather than sliced from spec hex.
-pub fn b10_raw_body(extension_value_bytes: &[u8]) -> Vec<u8> {
+pub fn extension_raw_body(key: &str, extension_value_bytes: &[u8]) -> Vec<u8> {
     let mut body = r_map(&b4_raw_entries());
     assert_eq!(body[0], 0xa6, "B.4 body head");
     body[0] = 0xa7;
     body.extend(r_uint(8));
-    // Extension map: one entry keyed by the B.10 URI; the value bytes are
-    // supplied raw because they are deliberately invalid CBOR content.
+    // Extension map: one entry keyed by the published URI; the value bytes
+    // are supplied raw because they are deliberately outside what the
+    // crate's authoring path can produce (invalid CBOR content for B.10,
+    // schema-disallowed simple values for B.12).
     body.extend(r_head(5, 1));
-    body.extend(r_tstr(&fx_str("b10_extension_key")));
+    body.extend(r_tstr(key));
     body.extend_from_slice(extension_value_bytes);
     body
+}
+
+/// The Appendix B.10 construction over the published B.10 extension key.
+pub fn b10_raw_body(extension_value_bytes: &[u8]) -> Vec<u8> {
+    extension_raw_body(&fx_str("b10_extension_key"), extension_value_bytes)
+}
+
+/// The Appendix B.12 construction over the published B.12 extension key.
+pub fn b12_raw_body(extension_value_bytes: &[u8]) -> Vec<u8> {
+    extension_raw_body(&fx_str("b12_extension_key"), extension_value_bytes)
 }
 
 /// Assembles a complete tagged envelope from raw parts with an arbitrary

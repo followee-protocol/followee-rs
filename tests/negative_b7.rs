@@ -336,6 +336,62 @@ fn sec_b7_item13_single_flipped_signature_bit_is_invalid_signature() {
 // tests/conformance.rs (`sec_b10_fault_isolated_bodies_…`), each asserting
 // exact `invalidCbor`.
 
+// ---------------------------------------------------------------------------
+// Item 19 (v0.8.1): a deterministically encoded CBOR simple value other than
+// false/true/null/undefined where the applicable v1 schema admits no such
+// type. The byte-exact vector reproduction lives in tests/conformance.rs
+// (`sec_b12_fault_isolated_bodies_…`); these cases assert the layered
+// classification through the production record path and keep `undefined`
+// separately rejected by the profile.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sec_b7_item19_schema_disallowed_simple_values_are_exact_schema_violation() {
+    // Both published B.12 encodings: simple value 16 (one-byte f0) and
+    // simple value 32 (two-byte f8 20), re-signed with Alice's root key.
+    for simple_value in [16u64, 32u64] {
+        let body = b12_raw_body(&r_head(7, simple_value));
+        let envelope = seal(&body, &root_seed());
+        assert_eq!(
+            verify_alice(&envelope),
+            Err(VerifyError::SchemaViolation),
+            "simple value {simple_value}: exact schemaViolation, not a \
+             deterministic-profile fault"
+        );
+    }
+}
+
+#[test]
+fn sec_b7_item19_undefined_extension_value_remains_non_deterministic_cbor() {
+    // The companion boundary: `undefined` (f7) in the same extension
+    // position stays forbidden by section 6.1.2 rule 4 and produces
+    // nonDeterministicCbor, unchanged by the v0.8.1 clarification.
+    let body = b12_raw_body(&[0xf7]);
+    let envelope = seal(&body, &root_seed());
+    assert_eq!(
+        verify_alice(&envelope),
+        Err(VerifyError::NonDeterministicCbor)
+    );
+}
+
+#[test]
+fn sec_b7_item19_simple_values_rejected_wherever_the_schema_expects_other_types() {
+    // The v0.8.1 rule is not extension-specific: a schema-disallowed simple
+    // value in a typed record-body position is also exactly schemaViolation
+    // (section 15.3 code 6 covers any data-item type the schema does not
+    // admit). Simple value 16 as the authority value (label 3).
+    let mut entries = b4_raw_entries();
+    entries[3].1 = r_head(7, 16);
+    let envelope = seal(&r_map(&entries), &root_seed());
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+
+    // And as a nested extension-object map key.
+    let ext_value = r_map(&[(r_head(7, 16), r_uint(1))]);
+    let body = b12_raw_body(&ext_value);
+    let envelope = seal(&body, &root_seed());
+    assert_eq!(verify_alice(&envelope), Err(VerifyError::SchemaViolation));
+}
+
 #[test]
 fn sec_b7_item15_valid_until_before_timestamp_is_rejected() {
     // Insert label 6 = timestamp - 1 and re-sign with the root key.

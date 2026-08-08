@@ -737,6 +737,10 @@ fn parse_extension_value(r: &mut Reader<'_>) -> Result<ExtensionValue, VerifyErr
             SIMPLE_FALSE => Ok(ExtensionValue::Bool(false)),
             SIMPLE_TRUE => Ok(ExtensionValue::Bool(true)),
             SIMPLE_NULL => Ok(ExtensionValue::Null),
+            // Any other simple value passed the section 6.1.1/6.1.2 layers
+            // in its shortest encoding but is not admitted by the Appendix A
+            // `extension-value` schema: exact `schemaViolation`, never
+            // `nonDeterministicCbor` (v0.8.1; Appendix B.12).
             _ => Err(VerifyError::SchemaViolation),
         },
         MAJOR_ARRAY => {

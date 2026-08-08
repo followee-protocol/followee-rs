@@ -73,6 +73,28 @@ fn rejects_non_minimal_and_indefinite_encodings_as_non_deterministic() {
 }
 
 #[test]
+fn sec_6_1_2_admits_schema_disallowed_simple_values_as_deterministic() {
+    // v0.8.1: simple values other than false/true/null/undefined pass the
+    // structural gate in their shortest encodings; no schema admits them,
+    // but that is a section 6.1.3 record-verification classification.
+    for bytes in [
+        &[0xe0][..],         // simple 0
+        &[0xf0],             // simple 16 (B.12, one-byte)
+        &[0xf3],             // simple 19
+        &[0xf8, 0x20],       // simple 32 (B.12, two-byte)
+        &[0xf8, 0xff],       // simple 255
+        &[0x81, 0xf0],       // nested in an array
+        &[0xa1, 0x00, 0xf0], // as a map value
+    ] {
+        assert_eq!(full(bytes), Ok(()), "{bytes:02x?}");
+    }
+    // A two-byte simple encoding below 32 stays ill-formed (invalidCbor),
+    // and undefined stays profile-forbidden (nonDeterministicCbor).
+    assert_eq!(full(&[0xf8, 0x10]), Err(VerifyError::InvalidCbor));
+    assert_eq!(full(&[0xf7]), Err(VerifyError::NonDeterministicCbor));
+}
+
+#[test]
 fn sec_6_1_2_rejects_misordered_map_keys_as_non_deterministic() {
     // {1:0, 0:0} misordered: a deterministic-profile fault.
     assert_eq!(
@@ -221,6 +243,18 @@ fn classification_parity_with_the_record_verification_path() {
     assert_eq!(
         verify_record(&alice_did(), &envelope).map(|_| ()),
         Err(VerifyError::InvalidCbor)
+    );
+
+    // Schema-disallowed simple value in the body (v0.8.1): the structural
+    // wrapper accepts, and only record verification rejects — with
+    // SchemaViolation, proving the classification moved layers rather than
+    // renaming itself inside the wrong one.
+    let payload = b12_raw_body(&r_head(7, 16));
+    assert_eq!(full(&payload), Ok(()));
+    let envelope = seal(&payload, &root_seed());
+    assert_eq!(
+        verify_record(&alice_did(), &envelope).map(|_| ()),
+        Err(VerifyError::SchemaViolation)
     );
 
     // The valid B.4 body passes the wrapper, and its envelope verifies.

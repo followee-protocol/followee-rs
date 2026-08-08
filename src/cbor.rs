@@ -1,4 +1,4 @@
-//! Strict deterministic CBOR subset (specification section 6.1, v0.8).
+//! Strict deterministic CBOR subset (specification section 6.1, v0.8.1).
 //!
 //! This is a protocol-specific codec, not a general CBOR library
 //! (IMPLEMENTATION.md section 6.1). The reader retains exact received byte
@@ -13,7 +13,11 @@
 //! deterministic profile (section 6.1.2: definite lengths, minimal
 //! encodings, bytewise key order, no tags/floats/`undefined`) classifies as
 //! `nonDeterministicCbor` for basically valid items; Followee schemas are
-//! layered above by the typed parsers. Validation recurses through every
+//! layered above by the typed parsers. Simple values other than `false`,
+//! `true`, `null`, and `undefined` pass this structural gate in their
+//! shortest encodings (v0.8.1): whether a schema admits them is a section
+//! 6.1.3 question answered by the typed parsers with `schemaViolation`, not
+//! by this layer. Validation recurses through every
 //! array and map — including unknown extension values — and stops at
 //! byte-string boundaries: byte-string contents are opaque and are never
 //! reinterpreted as CBOR by this validator.
@@ -32,7 +36,7 @@ pub(crate) enum CborError {
     Invalid,
     /// Basically valid CBOR that violates the section 6.1.2 deterministic
     /// profile: non-minimal encodings, indefinite lengths, misordered map
-    /// keys, tags, floats, `undefined`, or reserved simples.
+    /// keys, tags, floats, or `undefined`.
     NonDeterministic,
     /// The bytes exceed a nesting-depth or member-count limit.
     LimitExceeded,
@@ -40,9 +44,12 @@ pub(crate) enum CborError {
 
 /// A decoded CBOR item head: major type and argument value.
 ///
-/// For major type 7 the argument is the simple value (only `20`, `21`, `22`
-/// survive [`Reader::read_head`]); floats and reserved encodings are rejected
-/// during head parsing.
+/// For major type 7 the argument is the simple value. Every simple value
+/// except `undefined` (23) survives [`Reader::read_head`] in its shortest
+/// encoding (specification v0.8.1 section 6.1.2); floats, `undefined`, and
+/// ill-formed or reserved encodings are rejected during head parsing. Typed
+/// parsers reject simple values their schema does not admit with
+/// `schemaViolation`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Head {
     pub major: u8,
@@ -61,6 +68,7 @@ pub(crate) const MAJOR_SIMPLE: u8 = 7;
 pub(crate) const SIMPLE_FALSE: u64 = 20;
 pub(crate) const SIMPLE_TRUE: u64 = 21;
 pub(crate) const SIMPLE_NULL: u64 = 22;
+pub(crate) const SIMPLE_UNDEFINED: u64 = 23;
 
 /// Cursor over received bytes. Never copies; slices refer to the input.
 pub(crate) struct Reader<'a> {
@@ -116,11 +124,15 @@ impl<'a> Reader<'a> {
 
         if major == MAJOR_SIMPLE {
             return match ai {
+                // One-byte simple values 0–23 are their own shortest
+                // encodings. `undefined` is forbidden by profile rule 4;
+                // every other value — including the schema-unassigned
+                // 0–19 — is well-formed, basically valid, and
+                // deterministic (v0.8.1). Whether a schema admits it is
+                // decided above this layer as `schemaViolation`.
                 0..=23 => match u64::from(ai) {
-                    v @ (SIMPLE_FALSE | SIMPLE_TRUE | SIMPLE_NULL) => Ok(Head { major, arg: v }),
-                    // undefined (23) and unassigned simple values are valid
-                    // CBOR but forbidden by the section 6.1 profile.
-                    _ => Err(CborError::NonDeterministic),
+                    SIMPLE_UNDEFINED => Err(CborError::NonDeterministic),
+                    v => Ok(Head { major, arg: v }),
                 },
                 24 => {
                     let v = self.byte()?;
@@ -128,7 +140,12 @@ impl<'a> Reader<'a> {
                         // RFC 8949: two-byte simple below 32 is ill-formed.
                         Err(CborError::Invalid)
                     } else {
-                        Err(CborError::NonDeterministic)
+                        // Simple values 32–255: the two-byte form is their
+                        // only, and therefore shortest, encoding.
+                        Ok(Head {
+                            major,
+                            arg: u64::from(v),
+                        })
                     }
                 }
                 // Floating-point encodings are forbidden by the profile.
@@ -492,10 +509,27 @@ mod tests {
             ok(&[0xfb, 0, 0, 0, 0, 0, 0, 0, 0]),
             Err(CborError::NonDeterministic)
         );
-        assert_eq!(ok(&[0xf0]), Err(CborError::NonDeterministic)); // simple 16
-        assert_eq!(ok(&[0xf8, 0x20]), Err(CborError::NonDeterministic)); // simple 32
-        assert_eq!(ok(&[0xf8, 0x10]), Err(CborError::Invalid)); // ill-formed two-byte simple
         assert_eq!(ok(&[0xff]), Err(CborError::Invalid)); // stray break
+    }
+
+    #[test]
+    fn sec_6_1_2_admits_schema_disallowed_simple_values_as_deterministic() {
+        // v0.8.1: simple values other than false/true/null/undefined pass
+        // sections 6.1.1 and 6.1.2 in their shortest encodings; whether a
+        // schema admits them is a section 6.1.3 question answered above
+        // this layer.
+        assert_eq!(ok(&[0xe0]), Ok(())); // simple 0, one-byte
+        assert_eq!(ok(&[0xf0]), Ok(())); // simple 16, one-byte (B.12)
+        assert_eq!(ok(&[0xf3]), Ok(())); // simple 19, one-byte
+        assert_eq!(ok(&[0xf8, 0x20]), Ok(())); // simple 32, two-byte (B.12)
+        assert_eq!(ok(&[0xf8, 0xff]), Ok(())); // simple 255, two-byte
+        // undefined remains a profile violation under rule 4.
+        assert_eq!(ok(&[0xf7]), Err(CborError::NonDeterministic));
+        // A two-byte encoding below 32 is not well-formed (RFC 8949),
+        // including the would-be two-byte forms of admitted values.
+        for second in [0x00, 0x10, 0x14, 0x17, 0x1f] {
+            assert_eq!(ok(&[0xf8, second]), Err(CborError::Invalid), "{second}");
+        }
     }
 
     #[test]

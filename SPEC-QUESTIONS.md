@@ -3,7 +3,7 @@
 Ambiguities identified in the normative specification
 (`followee-protocol/followee`), tracked against the pinned commit in
 IMPLEMENTATION.md section 2 (currently
-`610f9a1e78d860e8bd685ef1435a53a16f1221ec`, specification v0.8). Per
+`2d5292e95af022af7beee2d154e7217e29907960`, specification v0.8.1). Per
 IMPLEMENTATION.md section 2, questions are resolved in the protocol repository
 — never silently in this implementation — and no milestone may pass while an
 open question affects code delivered by that milestone. Resolving a question
@@ -11,7 +11,7 @@ that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
 **All recorded questions are resolved**, and every resolution remains in
-force in specification v0.8 at the pinned commit. Each resolved entry cites
+force in specification v0.8.1 at the pinned commit. Each resolved entry cites
 the amending version and records the test obligation the resolution creates.
 
 ---
@@ -326,3 +326,47 @@ the exact request/response bytes, cursor values, and digests.
 **Test obligations:** Milestone 1 byte reproduction done
 (`b11_vectors::sec_b11_5/7_*`); receiver behaviours are Milestone 4
 acceptance gates (IMPLEMENTATION.md section 13).
+
+## SQ-15 — Classification of schema-disallowed CBOR simple values: `nonDeterministicCbor` vs `schemaViolation`
+
+**Status:** resolved (spec v0.8.1, commit `2d5292e`) · **Affected:** Milestone 1 · **Spec:** sections 6.1.2, 6.1.3, 15.3, 20.1; Appendix B.7 item 19; Appendix B.12
+
+Specification v0.8 section 6.1.2 rule 4 forbade floats, `undefined`, and
+tags, but did not state how to classify a CBOR simple value other than
+`false`, `true`, `null`, and `undefined` — for example simple value 16
+(`f0`, one-byte) or simple value 32 (`f8 20`, two-byte). Such a value's
+shortest encoding is well-formed, basically valid, and deterministic under
+RFC 8949, yet no v1 schema in Appendix A admits it. This implementation had
+treated the whole class as profile-forbidden (`nonDeterministicCbor`), and
+independent implementations could reasonably classify it as either a
+section 6.1.2 profile fault or a section 6.1.3 schema fault. Resolved by
+the v0.8.1 amendment:
+
+1. a well-formed, basically valid, deterministically encoded simple value
+   that no v1 schema admits passes sections 6.1.1 and 6.1.2 and produces
+   exact `schemaViolation` under section 6.1.3; it MUST NOT be classified
+   `nonDeterministicCbor` merely because the schema assigns it no meaning;
+2. external registration of semantics for such a value does not alter the
+   closed v1 schemas;
+3. rule 4 is unchanged: `undefined` remains profile-forbidden and stays
+   `nonDeterministicCbor` (a two-byte simple encoding below 32 likewise
+   stays ill-formed, `invalidCbor`, under RFC 8949); and
+4. the section 15.3 code 6 description now names data-item types the
+   applicable schema does not admit, and Appendix B.7 gains item 19 with
+   the two fault-isolated, Alice-root-re-signed Appendix B.12 vectors
+   (simple value 16 one-byte, simple value 32 two-byte, both inside an
+   otherwise ignored unknown extension, expected `schemaViolation`).
+
+Implemented by admitting unassigned simple values (one-byte 0–19 and
+two-byte 32–255, shortest encodings) through `read_head` in `src/cbor.rs`;
+the extension-value and typed-schema parsers already rejected non-admitted
+CBOR types with `schemaViolation`, so the boundary moved layers without a
+new rejection path.
+
+**Test obligations (Milestone 1, done):**
+`cbor::tests::sec_6_1_2_admits_schema_disallowed_simple_values_as_deterministic`,
+`validate_cbor_api::sec_6_1_2_admits_schema_disallowed_simple_values_as_deterministic`,
+`conformance::sec_b12_fault_isolated_bodies_reproduce_and_fail_exactly_schema_violation`,
+`negative_b7::sec_b7_item19_schema_disallowed_simple_values_are_exact_schema_violation`,
+`sec_b7_item19_undefined_extension_value_remains_non_deterministic_cbor`,
+`sec_b7_item19_simple_values_rejected_wherever_the_schema_expects_other_types`.

@@ -1,11 +1,11 @@
 {
   "_provenance": {
     "source": "followee-protocol/followee Followee-Specification.md Appendix B",
-    "spec_version": "v0.8",
-    "pinned_commit": "610f9a1e78d860e8bd685ef1435a53a16f1221ec",
+    "spec_version": "v0.8.1",
+    "pinned_commit": "2d5292e95af022af7beee2d154e7217e29907960",
     "derivation_status": "specification",
     "method": "mechanically extracted from the pinned specification markdown",
-    "spec_sha256": "474f0b3880e838a5232890c3e2edc183c341fd25e28d7db0066ad109aa43113b"
+    "spec_sha256": "ad9895d1672e3f4f68dac9e2a92c1d04fb63229c406e67dc1041a5971a361b7d"
   },
   "root_seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
   "root_public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -146,5 +146,26 @@
       "response_sha256": "334740ea2ce15b4b70dfcdd88f4cfc7f31bfd53f1b7615aa08df1c4137f4d795",
       "rejected_next_cursor": "7630382d30303033"
     }
-  }
+  },
+  "b12_extension_key": "https://example.com/ext",
+  "b12_cases": [
+    {
+      "name": "simple_value_16",
+      "simple_value": 16,
+      "appended_bytes": "08a17768747470733a2f2f6578616d706c652e636f6d2f657874f0",
+      "body_digest": "0f08c916dbe92d5bebe06804f4e3bf5a1e23c7f32360638cd7d10a9b15cca1cf",
+      "sig_structure_length": 354,
+      "signature": "6984d30e32b516e59450cd22c14b7bb6c93b83dad2ce9850e70691a4b76363bfd9823f60151c1c77dfe41f476e4183e28f4e676bbff536d558b96abc2c8e8c0d",
+      "expected_error": "schemaViolation"
+    },
+    {
+      "name": "simple_value_32",
+      "simple_value": 32,
+      "appended_bytes": "08a17768747470733a2f2f6578616d706c652e636f6d2f657874f820",
+      "body_digest": "2687c33152622b00dad17f6389a6d781d6065fe3a19e5bf98575d15440e3ff49",
+      "sig_structure_length": 355,
+      "signature": "1a30f8094723a03835429225a43c500c6cf7b68bbee3fb4e98145215fef849e680e091bae1fec9f07288c7d4ef9c1f235a5272f25260a0e49425036215a4cc06",
+      "expected_error": "schemaViolation"
+    }
+  ]
 }

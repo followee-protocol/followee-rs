@@ -108,3 +108,24 @@ which weakens a normative branch. The v0.8 classification change itself is
 pinned by the duplicate/misordered split tests in `cbor::tests`,
 `validate_cbor_api`, `negative_b7` item 9, and the Appendix B.10 exact
 `invalidCbor` conformance suite.
+
+**v0.8.1 re-pin addendum:** the v0.8.1 maintenance pass changed one
+production branch — `src/cbor.rs` `read_head` now admits CBOR simple values
+other than `false`/`true`/`null`/`undefined` through the deterministic layer
+in their shortest encodings (one-byte 0–19, two-byte 32–255), so the
+already-present schema-layer rejections classify them as exact
+`schemaViolation` (specification v0.8.1 sections 6.1.2/6.1.3; Appendix
+B.12) — plus documentation-only updates in `src/contact.rs`, `src/error.rs`,
+and `src/lib.rs`. A scoped sweep over all four changed files (cargo-mutants
+v27.1.0, `--jobs 2`) reported 375 mutants: 352 caught, 13 unviable, 10
+missed. All ten missed are the long-documented equivalents in the table
+above: the `cbor.rs` disjoint-operand `|` → `^` family (`read_wide` plus the
+five `Writer::head` sites), the major-7 reserved-ai fall-through arm, the
+`is_language_tag` entry-guard equivalence, and the two unobservable
+media-type length-cap boundary mutants. No new survivor was introduced, and
+no surviving mutant touches the v0.8.1 simple-value branch: the
+`undefined`-versus-admitted split and the two-byte well-formedness boundary
+are pinned by
+`cbor::tests::sec_6_1_2_admits_schema_disallowed_simple_values_as_deterministic`,
+`validate_cbor_api`, the Appendix B.12 exact `schemaViolation` conformance
+suite, and the `negative_b7` item 19 cases.

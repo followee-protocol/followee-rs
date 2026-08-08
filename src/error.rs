@@ -23,7 +23,10 @@ pub enum VerifyError {
     /// restricted Followee profile.
     #[error("encoding violates the deterministic CBOR profile")]
     NonDeterministicCbor,
-    /// Parsed object violates its v1 schema or limits.
+    /// Parsed object violates its v1 schema or limits, including use of a
+    /// well-formed, basically valid, deterministically encoded data-item
+    /// type that the applicable schema does not admit (section 15.3 code 6,
+    /// v0.8.1 wording).
     #[error("record violates the v1 schema or its limits")]
     SchemaViolation,
     /// DID syntax, multibase encoding, or multihash structure is malformed.

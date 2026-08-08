@@ -51,11 +51,16 @@ pub use cose::sig_structure;
 /// equivalence, or invalid RFC 3629 UTF-8 — is
 /// [`error::VerifyError::InvalidCbor`]; basically valid input with
 /// non-minimal or indefinite encodings, misordered map keys, or
-/// profile-forbidden items is [`error::VerifyError::NonDeterministicCbor`];
+/// profile-forbidden items (tags, floats, `undefined`) is
+/// [`error::VerifyError::NonDeterministicCbor`];
 /// exceeding a requested limit is [`error::VerifyError::SchemaViolation`].
-/// Validation recurses through arrays and maps and stops at byte-string
-/// boundaries; byte-string contents are opaque and never reinterpreted as
-/// CBOR.
+/// CBOR simple values other than `false`, `true`, `null`, and `undefined`
+/// pass this structural validation in their shortest encodings
+/// (specification v0.8.1 section 6.1.2): no v1 schema admits them, but that
+/// is a section 6.1.3 schema classification produced by record verification,
+/// not by this gate. Validation recurses through arrays and maps and stops
+/// at byte-string boundaries; byte-string contents are opaque and never
+/// reinterpreted as CBOR.
 ///
 /// Followee v1 defines no context requiring limits beyond
 /// [`limits::MAX_BODY_DEPTH`] and [`limits::MAX_BODY_MEMBERS`]. Requested

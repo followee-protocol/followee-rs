@@ -422,6 +422,101 @@ fn sec_b10_fault_isolated_bodies_reproduce_and_fail_exactly_invalid_cbor() {
 }
 
 #[test]
+fn sec_b12_fault_isolated_bodies_reproduce_and_fail_exactly_schema_violation() {
+    // Appendix B.12 (v0.8.1): two complete, correctly signed records whose
+    // only fault is a deterministically encoded CBOR simple value that no v1
+    // schema admits, placed inside an otherwise valid unknown extension.
+    let cases = fixtures()["b12_cases"]
+        .as_array()
+        .expect("b12_cases present")
+        .clone();
+    assert_eq!(cases.len(), 2, "two normative B.12 vectors");
+    for case in cases {
+        let name = case["name"].as_str().expect("name");
+        let hex =
+            |field: &str| hex::decode(case[field].as_str().expect("hex field")).expect("valid hex");
+        let simple_value = case["simple_value"].as_u64().expect("simple value");
+
+        // Build the extension value from its structured description: the
+        // shortest head encoding of the stated simple value (f0 for 16,
+        // f8 20 for 32), never sliced from spec hex.
+        let value_bytes = r_head(7, simple_value);
+
+        // Reconstruct the raw body from structured parts and prove the
+        // appended portion equals the published appended bytes.
+        let body = b12_raw_body(&value_bytes);
+        let mut expected_appended = r_uint(8);
+        expected_appended.extend(r_head(5, 1));
+        expected_appended.extend(r_tstr(&fx_str("b12_extension_key")));
+        expected_appended.extend(&value_bytes);
+        assert_eq!(
+            expected_appended,
+            hex("appended_bytes"),
+            "{name}: appended bytes"
+        );
+        assert!(body.ends_with(&expected_appended), "{name}: body suffix");
+        assert_eq!(
+            crypto::sha256(&body).as_slice(),
+            hex("body_digest"),
+            "{name}: body digest"
+        );
+
+        // The stated Sig_structure length and the published signature both
+        // reproduce; the signature is valid under Alice's legitimate root
+        // key at the primitive boundary.
+        let sig_structure = followee::sig_structure(&body);
+        assert_eq!(
+            sig_structure.len() as u64,
+            case["sig_structure_length"].as_u64().expect("length"),
+            "{name}: Sig_structure length"
+        );
+        let signature = followee::crypto::ed25519_sign(&root_seed(), &sig_structure);
+        assert_eq!(
+            signature.as_slice(),
+            hex("signature"),
+            "{name}: re-signature matches the published bytes"
+        );
+        assert!(
+            crypto::verify_followee_ed25519(&fx32("root_public_key"), &sig_structure, &signature),
+            "{name}: signature verifies under Alice's root key"
+        );
+
+        // The section 6.1 boundary is tested twice (IMPLEMENTATION.md
+        // section 11.1): the public deterministic-CBOR validation entry
+        // point admits the simple value and the complete raw body...
+        assert_eq!(
+            followee::validate_cbor(
+                &value_bytes,
+                followee::limits::MAX_BODY_DEPTH,
+                followee::limits::MAX_BODY_MEMBERS
+            ),
+            Ok(()),
+            "{name}: bare simple value passes sections 6.1.1 and 6.1.2"
+        );
+        assert_eq!(
+            followee::validate_cbor(
+                &body,
+                followee::limits::MAX_BODY_DEPTH,
+                followee::limits::MAX_BODY_MEMBERS
+            ),
+            Ok(()),
+            "{name}: complete raw body passes sections 6.1.1 and 6.1.2"
+        );
+
+        // ...while complete record verification rejects the exact signed
+        // envelope at the extension-value schema: exactly schemaViolation,
+        // not invalidCbor, nonDeterministicCbor, or invalidSignature.
+        assert_eq!(case["expected_error"].as_str(), Some("schemaViolation"));
+        let envelope = seal(&body, &root_seed());
+        assert_eq!(
+            verify_record(&alice_did(), &envelope),
+            Err(VerifyError::SchemaViolation),
+            "{name}: exact classification through verify_record"
+        );
+    }
+}
+
+#[test]
 fn sec_20_4_structured_input_determinism_across_runs() {
     // Byte-identical output from identical structured input, repeatedly.
     let first = b4_body().encode().expect("encodes");

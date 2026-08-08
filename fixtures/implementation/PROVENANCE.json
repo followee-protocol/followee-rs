@@ -2,9 +2,9 @@
   "_provenance": {
     "description": "Construction provenance for the executable Appendix B.7 negative conformance cases in tests/negative_b7.rs and tests/conformance.rs",
     "derivation_status": "implementation",
-    "spec_version": "v0.8",
-    "pinned_commit": "610f9a1e78d860e8bd685ef1435a53a16f1221ec",
-    "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14, and 17; the identityBindingMismatch symbol is normative as of specification v0.4, and the section 6.1.1/6.1.2 split fixing items 7-9 is normative as of specification v0.8). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations. The five Appendix B.10 basic-validity vectors are specification-status material recorded in fixtures/specification/appendix_b.json, not here."
+    "spec_version": "v0.8.1",
+    "pinned_commit": "2d5292e95af022af7beee2d154e7217e29907960",
+    "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14, 17, and 19; the identityBindingMismatch symbol is normative as of specification v0.4, the section 6.1.1/6.1.2 split fixing items 7-9 is normative as of specification v0.8, and the schema-disallowed simple-value classification fixing item 19 is normative as of specification v0.8.1). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations. The five Appendix B.10 basic-validity vectors and the two Appendix B.12 schema-disallowed simple-value vectors are specification-status material recorded in fixtures/specification/appendix_b.json, not here."
   },
   "cases": [
     {
@@ -468,6 +468,22 @@
         "errorAssertion": "unspecified"
       },
       "note": "the N+1 constructions keep every per-field and per-collection value within its own cap (62 and 61 services are under the 64-entry limit) so the aggregate member budget is the only operative fault; the tests additionally assert this implementation's schemaViolation classification, which section 6.1.3 names as the fallback for limit failures with no more specific assigned error"
+    },
+    {
+      "id": "b7-19-undefined-twin",
+      "baseVector": "B.4",
+      "mutation": "extension value replaced by CBOR simple value undefined (f7) inside the same otherwise valid unknown extension as the B.12 vectors; re-signed with the applicable legitimate key",
+      "protectedBytesChanged": false,
+      "payloadBytesChanged": true,
+      "resigned": true,
+      "signingKey": "B.2 root seed",
+      "faultProfile": "single",
+      "expected": {
+        "accepted": false,
+        "errorAssertion": "exact",
+        "error": "nonDeterministicCbor"
+      },
+      "note": "the IMPLEMENTATION.md item 19 companion case: undefined remains forbidden by section 6.1.2 rule 4 and stays nonDeterministicCbor while the unassigned B.12 simple values 16 and 32 are exact schemaViolation; the two B.12 records themselves are specification-status fixtures in fixtures/specification/appendix_b.json"
     }
   ]
 }

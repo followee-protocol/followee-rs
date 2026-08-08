@@ -9,10 +9,10 @@ to, reused by, or placed in the authoring context of that model's separate
 session. It also uses pyca/cryptography's ordinary Ed25519 verify, which is
 NOT a Followee-strict section 3.3 verifier.
 
-Verified against spec v0.8 vectors (Appendix B.2–B.11): 76/76 values
+Verified against spec v0.8.1 vectors (Appendix B.2–B.12): 82/82 values
 reproduce byte-for-byte, including the B.9 Bob identity, the B.10
-fault-isolated basic-validity signatures, and the B.11 wrapper lengths and
-SHA-256 digests.
+fault-isolated basic-validity signatures, the B.11 wrapper lengths and
+SHA-256 digests, and the B.12 schema-disallowed simple-value signatures.
 Requires: python3 with the `cryptography` package.
 """
 import hashlib
@@ -270,5 +270,31 @@ atk_env7 = enc_head(5, 6) + enc(0) + enc(1) + enc(1) + enc(0) + enc(2) + \
     enc(3) + enc(b"v08-0003") + enc(4) + b"\xf4" + enc(5) + enc(GEN)
 check_wrapper("B.11.7 response", atk_env7, 945,
               "334740ea2ce15b4b70dfcdd88f4cfc7f31bfd53f1b7615aa08df1c4137f4d795")
+
+print("=== B.12 fault-isolated schema-disallowed-simple-value records (v0.8.1) ===")
+# Same construction as B.10 (B.4 body head a6 -> a7, label 8, extension map
+# keyed by https://example.com/ext), with a deterministically encoded simple
+# value the v1 extension-value schema does not admit. f0 is the shortest
+# one-byte encoding of simple 16; f8 20 the shortest two-byte encoding of
+# simple 32. Expected classification: schemaViolation (not covered here —
+# this script derives bytes, digests, and signatures only).
+b12_values = [
+    ("simple value 16", b"\xf0",
+     "0f08c916dbe92d5bebe06804f4e3bf5a1e23c7f32360638cd7d10a9b15cca1cf", 354,
+     "6984d30e32b516e59450cd22c14b7bb6c93b83dad2ce9850e70691a4b76363bfd9823f60151c1c77dfe41f476e4183e28f4e676bbff536d558b96abc2c8e8c0d"),
+    ("simple value 32", b"\xf8\x20",
+     "2687c33152622b00dad17f6389a6d781d6065fe3a19e5bf98575d15440e3ff49", 355,
+     "1a30f8094723a03835429225a43c500c6cf7b68bbee3fb4e98145215fef849e680e091bae1fec9f07288c7d4ef9c1f235a5272f25260a0e49425036215a4cc06"),
+]
+for name, value_bytes, digest_hex, ss_len, sig_hex in b12_values:
+    raw = bytearray(body4)
+    assert raw[0] == 0xA6
+    raw[0] = 0xA7
+    raw += enc(8) + enc_head(5, 1) + enc(EXT_KEY) + value_bytes
+    raw = bytes(raw)
+    check(f"B.12 {name} body digest", hashlib.sha256(raw).digest(), H(digest_hex))
+    ss12 = sig_structure(raw)
+    check(f"B.12 {name} Sig_structure length == {ss_len}", str(len(ss12)), str(ss_len))
+    check(f"B.12 {name} signature (Alice root key)", sign(root_sk, ss12), H(sig_hex))
 
 print(f"\n{ok_count} OK, {fail_count} FAIL")
