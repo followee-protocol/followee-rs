@@ -106,3 +106,7 @@ jobs:
         run: cargo +nightly fuzz run verify_record --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
       - name: Fuzz contact-JSON authoring parser
         run: cargo +nightly fuzz run contact_json_parse --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
+      - name: Fuzz relay API request parsing
+        run: cargo +nightly fuzz run relay_request_parse --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024
+      - name: Fuzz cursor decoding
+        run: cargo +nightly fuzz run cursor_decode --target x86_64-unknown-linux-gnu -- -max_total_time=45 -rss_limit_mb=1024

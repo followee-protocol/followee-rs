@@ -842,7 +842,8 @@ Deliver:
 - SQLite state;
 - atomic ingress algorithm;
 - `v1/info`, `v1/resolve`, `v1/directory`, `v1/publish` and `v1/changes`;
-- opaque cursors and reset behaviour; and
+- opaque cursors and reset behaviour;
+- the minimal `followee relay serve` operator command; and
 - black-box HTTP/CBOR tests.
 
 Acceptance:
@@ -854,7 +855,8 @@ Acceptance:
 - resolve distinguishes Absent from a retained but presently premature record;
 - successful `changes` responses never exceed the request's `itemLimit` and never advance past an omitted eligible entry;
 - `changes` uses the exact two-field status-`1` response as the sole ResetRequired signal, forbids labels `2` through `6` in that response, and enforces every other status-dependent field rule;
-- restart preserves identity, generation and sticky authority state; and
+- restart preserves identity, generation and sticky authority state;
+- `followee relay serve` starts the relay from a SQLite database path with the operating-system clock and CSPRNG injected, binds a loopback address by default (supporting port `0`), emits one machine-readable startup object reporting the actual bound address and relay identity, retains the development-mode refusal of unsafe non-loopback binding, shuts down cleanly on interrupt/termination signals where supported, and preserves identity and generation state across restart — while `relay publish`, `relay resolve` and `relay changes` remain later client work; and
 - malformed and oversized input is bounded before expensive processing.
 
 ### Milestone 4: resolver and relay network

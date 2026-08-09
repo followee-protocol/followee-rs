@@ -10,6 +10,7 @@ repository = "https://github.com/followee-protocol/followee-rs"
 publish = false
 
 [dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 base64 = "0.22"
 bs58 = "0.5"
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
@@ -18,9 +19,11 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "z
 getrandom = "0.4"
 hex = "0.4"
 iri-string = "0.7"
+rusqlite = { version = "0.37", features = ["bundled"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 zeroize = "1"
 
 [dev-dependencies]

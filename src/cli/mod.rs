@@ -141,6 +141,15 @@ enum TopCommand {
     /// Record operations.
     #[command(subcommand)]
     Record(RecordCommand),
+    /// Relay operations.
+    #[command(subcommand)]
+    Relay(RelayCommand),
+}
+
+#[derive(Subcommand, Debug)]
+enum RelayCommand {
+    /// Run the single bounded relay over a SQLite database.
+    Serve(ServeArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -254,6 +263,23 @@ struct SelectArgs {
     records: Vec<PathBuf>,
 }
 
+#[derive(Args, Debug)]
+struct ServeArgs {
+    /// SQLite database path; created on first use, reopened thereafter.
+    #[arg(long)]
+    database: PathBuf,
+    /// Listen address. Loopback by default; port 0 assigns an ephemeral
+    /// port, reported in the startup object.
+    #[arg(long, default_value = "127.0.0.1:0")]
+    listen: String,
+    /// Advertised canonical base URI ending in `/`. An HTTPS URI selects
+    /// conforming mode (for operation behind a TLS reverse proxy); when
+    /// omitted the relay runs in explicitly non-conforming development mode
+    /// with the bound loopback address.
+    #[arg(long)]
+    base_uri: Option<String>,
+}
+
 /// Runs the CLI with injected environment and output streams, returning the
 /// process exit status: `0` success, `1` operation failure, `2` usage error.
 pub fn run(
@@ -278,11 +304,14 @@ pub fn run(
             };
         }
     };
-    match dispatch(cli.command, rng, clock, stderr) {
-        Ok(output) => {
+    match dispatch(cli.command, rng, clock, stdout, stderr) {
+        Ok(Some(output)) => {
             let _ = writeln!(stdout, "{output}");
             0
         }
+        // The command wrote its own protocol-defined stdout (relay serve's
+        // startup object) and finished cleanly.
+        Ok(None) => 0,
         Err(error) => {
             let payload = json!({
                 "error": { "symbol": error.symbol(), "message": error.to_string() }
@@ -302,17 +331,134 @@ fn dispatch(
     command: TopCommand,
     rng: &dyn RandomSource,
     clock: &dyn Clock,
+    stdout: &mut dyn Write,
     stderr: &mut dyn Write,
-) -> Result<Value, CliError> {
+) -> Result<Option<Value>, CliError> {
     match command {
-        TopCommand::Identity(IdentityCommand::Create(args)) => identity_create(&args, rng, stderr),
-        TopCommand::Record(RecordCommand::SignRoot(args)) => sign(&args, Authority::Root, clock),
-        TopCommand::Record(RecordCommand::RevokeRoot(args)) => {
-            sign(&args, Authority::RootRevoked, clock)
+        TopCommand::Identity(IdentityCommand::Create(args)) => {
+            identity_create(&args, rng, stderr).map(Some)
         }
-        TopCommand::Record(RecordCommand::Verify(args)) => verify(&args, clock),
-        TopCommand::Record(RecordCommand::Inspect(args)) => inspect(&args, clock),
-        TopCommand::Record(RecordCommand::Select(args)) => select(&args, clock),
+        TopCommand::Record(RecordCommand::SignRoot(args)) => {
+            sign(&args, Authority::Root, clock).map(Some)
+        }
+        TopCommand::Record(RecordCommand::RevokeRoot(args)) => {
+            sign(&args, Authority::RootRevoked, clock).map(Some)
+        }
+        TopCommand::Record(RecordCommand::Verify(args)) => verify(&args, clock).map(Some),
+        TopCommand::Record(RecordCommand::Inspect(args)) => inspect(&args, clock).map(Some),
+        TopCommand::Record(RecordCommand::Select(args)) => select(&args, clock).map(Some),
+        TopCommand::Relay(RelayCommand::Serve(args)) => relay_serve(&args, rng, stdout, stderr),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// relay serve
+// ---------------------------------------------------------------------------
+
+/// Runs the production relay HTTP server over a SQLite store until an
+/// interrupt or termination signal arrives.
+///
+/// The startup object is the command's one protocol-defined stdout line;
+/// everything afterwards — the non-conforming development-mode notice and
+/// the shutdown message — is stderr diagnostics. The relay itself uses the
+/// operating-system clock ([`crate::clock::SystemClock`]); the injected
+/// `rng` supplies the identity generated on first database creation.
+fn relay_serve(
+    args: &ServeArgs,
+    rng: &dyn RandomSource,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<Option<Value>, CliError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| CliError::Environment(e.to_string()))?;
+    runtime.block_on(async {
+        let listener = tokio::net::TcpListener::bind(&args.listen)
+            .await
+            .map_err(|source| CliError::Io {
+                path: PathBuf::from(&args.listen),
+                source,
+            })?;
+        let bound = listener
+            .local_addr()
+            .map_err(|e| CliError::Environment(e.to_string()))?;
+        let (base_uri, development_mode) = match &args.base_uri {
+            Some(uri) => (uri.clone(), !uri.starts_with("https://")),
+            None => (format!("http://{bound}/"), true),
+        };
+
+        // A fresh identity is generated from the injected randomness only
+        // when the database is new; reopening keeps the persisted identity.
+        let fresh = crate::store::RelayIdentity::generate(rng)
+            .map_err(|e| CliError::Environment(e.to_string()))?;
+        let store = crate::store::sqlite::SqliteStore::open(&args.database, fresh)
+            .map_err(|e| CliError::Environment(e.to_string()))?;
+        let identity = {
+            use crate::store::RelayStore;
+            store
+                .identity()
+                .map_err(|e| CliError::Environment(e.to_string()))?
+        };
+        let relay = crate::relay::Relay::new(
+            Box::new(store),
+            Box::new(crate::clock::SystemClock),
+            crate::relay::RelayConfig {
+                base_uri: base_uri.clone(),
+                development_mode,
+            },
+        )
+        .map_err(|e| CliError::Usage(e.to_string()))?;
+
+        // The one machine-readable startup object; stdout carries nothing
+        // else. Secret material never exists in this command.
+        let startup = json!({
+            "listen": bound.to_string(),
+            "baseUri": base_uri,
+            "database": args.database.display().to_string(),
+            "developmentMode": development_mode,
+            "relayId": hex::encode(identity.relay_id),
+            "cursorGeneration": hex::encode(identity.cursor_generation),
+            "directoryGeneration": hex::encode(identity.directory_generation),
+        });
+        let _ = writeln!(stdout, "{startup}");
+        let _ = stdout.flush();
+        if development_mode {
+            let _ = writeln!(
+                stderr,
+                "WARNING: development mode is explicitly non-conforming: plain \
+                 HTTP on a loopback address only. Conforming public operation \
+                 requires an HTTPS base URI behind TLS."
+            );
+        }
+
+        crate::relay::http::serve_with_shutdown(
+            std::sync::Arc::new(relay),
+            listener,
+            shutdown_signal(),
+        )
+        .await
+        .map_err(|e| CliError::Environment(e.to_string()))?;
+        let _ = writeln!(stderr, "relay stopped");
+        Ok(None)
+    })
+}
+
+/// Resolves on Ctrl-C, or on SIGTERM where the platform delivers it.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("SIGTERM handler installs");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminate.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
 

@@ -43,3 +43,17 @@ path = "fuzz_targets/contact_json_parse.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "relay_request_parse"
+path = "fuzz_targets/relay_request_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cursor_decode"
+path = "fuzz_targets/cursor_decode.rs"
+test = false
+doc = false
+bench = false

@@ -397,6 +397,300 @@ pub fn protected_ed25519() -> Vec<u8> {
     vec![0xa1, 0x01, 0x32]
 }
 
+// ---------------------------------------------------------------------------
+// Test-side CBOR decoder, independent of the crate reader, for inspecting
+// relay responses. Panics on input the deterministic writer cannot produce.
+// ---------------------------------------------------------------------------
+
+/// A decoded CBOR value for test assertions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TestValue {
+    Uint(u64),
+    Nint(u64),
+    Bytes(Vec<u8>),
+    Text(String),
+    Bool(bool),
+    Null,
+    Array(Vec<TestValue>),
+    /// Map entries in received order.
+    Map(Vec<(TestValue, TestValue)>),
+}
+
+impl TestValue {
+    /// Looks up an unsigned-integer map label.
+    pub fn get(&self, wanted: u64) -> Option<&TestValue> {
+        match self {
+            TestValue::Map(entries) => entries.iter().find_map(|(k, v)| {
+                (matches!(k, TestValue::Uint(label) if *label == wanted)).then_some(v)
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn as_uint(&self) -> u64 {
+        match self {
+            TestValue::Uint(v) => *v,
+            other => panic!("expected uint, got {other:?}"),
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            TestValue::Bytes(v) => v,
+            other => panic!("expected bytes, got {other:?}"),
+        }
+    }
+
+    pub fn as_array(&self) -> &[TestValue] {
+        match self {
+            TestValue::Array(v) => v,
+            other => panic!("expected array, got {other:?}"),
+        }
+    }
+
+    /// The map's unsigned-integer labels in received order.
+    pub fn labels(&self) -> Vec<u64> {
+        match self {
+            TestValue::Map(entries) => entries
+                .iter()
+                .map(|(k, _)| match k {
+                    TestValue::Uint(v) => *v,
+                    other => panic!("expected uint label, got {other:?}"),
+                })
+                .collect(),
+            other => panic!("expected map, got {other:?}"),
+        }
+    }
+}
+
+/// Decodes exactly one CBOR item, panicking on trailing bytes.
+pub fn decode_value(bytes: &[u8]) -> TestValue {
+    let mut pos = 0;
+    let value = decode_at(bytes, &mut pos);
+    assert_eq!(pos, bytes.len(), "exactly one complete item");
+    value
+}
+
+fn decode_at(b: &[u8], pos: &mut usize) -> TestValue {
+    let ib = b[*pos];
+    *pos += 1;
+    let (major, ai) = (ib >> 5, ib & 0x1f);
+    let arg: u64 = match ai {
+        0..=23 => u64::from(ai),
+        24 => {
+            let v = u64::from(b[*pos]);
+            *pos += 1;
+            v
+        }
+        25 => {
+            let v = u64::from(u16::from_be_bytes([b[*pos], b[*pos + 1]]));
+            *pos += 2;
+            v
+        }
+        26 => {
+            let v = u64::from(u32::from_be_bytes(b[*pos..*pos + 4].try_into().unwrap()));
+            *pos += 4;
+            v
+        }
+        27 => {
+            let v = u64::from_be_bytes(b[*pos..*pos + 8].try_into().unwrap());
+            *pos += 8;
+            v
+        }
+        other => panic!("unsupported additional information {other}"),
+    };
+    match major {
+        0 => TestValue::Uint(arg),
+        1 => TestValue::Nint(arg),
+        2 => {
+            let v = b[*pos..*pos + arg as usize].to_vec();
+            *pos += arg as usize;
+            TestValue::Bytes(v)
+        }
+        3 => {
+            let v = std::str::from_utf8(&b[*pos..*pos + arg as usize])
+                .expect("valid UTF-8")
+                .to_owned();
+            *pos += arg as usize;
+            TestValue::Text(v)
+        }
+        4 => TestValue::Array((0..arg).map(|_| decode_at(b, pos)).collect()),
+        5 => TestValue::Map(
+            (0..arg)
+                .map(|_| (decode_at(b, pos), decode_at(b, pos)))
+                .collect(),
+        ),
+        7 => match arg {
+            20 => TestValue::Bool(false),
+            21 => TestValue::Bool(true),
+            22 => TestValue::Null,
+            other => panic!("unsupported simple value {other}"),
+        },
+        other => panic!("unsupported major {other}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Relay test builders and request encoders.
+// ---------------------------------------------------------------------------
+
+use followee::clock::ManualClock;
+use followee::relay::{Relay, RelayConfig};
+use followee::store::{MemoryStore, RelayIdentity, RelayStore};
+use std::sync::Arc;
+
+/// The Appendix B.11 directory generation.
+pub fn b11_generation() -> [u8; 16] {
+    fx_bytes_at("b11", "directory_generation")
+        .try_into()
+        .expect("16 bytes")
+}
+
+pub fn fx_bytes_at(section: &str, name: &str) -> Vec<u8> {
+    let mut value = fixtures()[section].clone();
+    for part in name.split('/') {
+        value = value[part].clone();
+    }
+    hex::decode(
+        value
+            .as_str()
+            .unwrap_or_else(|| panic!("fixture field {section}.{name} present")),
+    )
+    .expect("valid hex")
+}
+
+/// A deterministic relay identity whose directory generation is the exact
+/// Appendix B.11 value, so wrapper bytes reproduce byte-for-byte.
+pub fn test_identity() -> RelayIdentity {
+    RelayIdentity {
+        relay_id: [0xAA; 16],
+        cursor_generation: [0xC0; 16],
+        directory_generation: b11_generation(),
+    }
+}
+
+/// A clock at which both the B.4/B.6 Alice records and the B.9 Bob record
+/// are admissible and non-premature.
+pub const RELAY_NOW_MS: u64 = 1_785_589_201_123;
+
+pub struct TestRelay {
+    pub relay: Arc<Relay>,
+    pub clock: Arc<ManualClock>,
+}
+
+/// Builds a development-mode relay over the given store with a manual clock.
+pub fn relay_over(store: Box<dyn RelayStore>) -> TestRelay {
+    let clock = Arc::new(ManualClock::new(RELAY_NOW_MS));
+    let relay = Relay::new(
+        store,
+        Box::new(SharedClock(Arc::clone(&clock))),
+        RelayConfig {
+            base_uri: "http://127.0.0.1/".to_owned(),
+            development_mode: true,
+        },
+    )
+    .expect("valid test configuration");
+    TestRelay {
+        relay: Arc::new(relay),
+        clock,
+    }
+}
+
+/// Builds a memory-backed test relay.
+pub fn memory_relay() -> TestRelay {
+    relay_over(Box::new(MemoryStore::new(test_identity())))
+}
+
+/// Clock adapter sharing one `ManualClock` between test and relay.
+pub struct SharedClock(pub Arc<ManualClock>);
+
+impl followee::clock::Clock for SharedClock {
+    fn now_ms(&self) -> Result<u64, followee::clock::ClockError> {
+        self.0.now_ms()
+    }
+}
+
+/// Encodes a deterministic `v1/resolve` request for the given DID strings.
+pub fn resolve_request(dids: &[&str]) -> Vec<u8> {
+    let items: Vec<Vec<u8>> = dids.iter().map(|d| r_tstr(d)).collect();
+    r_map(&[(r_uint(0), r_uint(1)), (r_uint(1), r_array(&items))])
+}
+
+/// Encodes a deterministic `v1/changes` request.
+pub fn changes_request(cursor: Option<&[u8]>, item_limit: u64, byte_limit: u64) -> Vec<u8> {
+    let cursor_value = match cursor {
+        Some(bytes) => r_bstr(bytes),
+        None => vec![0xf6],
+    };
+    r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), cursor_value),
+        (r_uint(2), r_uint(item_limit)),
+        (r_uint(3), r_uint(byte_limit)),
+    ])
+}
+
+/// Builds a fresh valid identity whose record carries `pad` extension bytes.
+/// The derived seeds are test material distinct from every published
+/// Appendix B seed.
+pub fn synthetic_identity_record(index: u64, pad: usize) -> (String, Vec<u8>) {
+    use followee::record::{
+        Authority, AuthorityDescriptor, RecordBody, revocation_commitment, sign_record,
+    };
+    let mut root = [0u8; 32];
+    root[..8].copy_from_slice(&index.to_be_bytes());
+    root[31] = 0x51;
+    let mut revocation = [0u8; 32];
+    revocation[..8].copy_from_slice(&index.to_be_bytes());
+    revocation[31] = 0x52;
+    let descriptor = AuthorityDescriptor {
+        root_key: followee::crypto::ed25519_public_key(&root),
+        revocation_commitment: revocation_commitment(&followee::crypto::ed25519_public_key(
+            &revocation,
+        )),
+    };
+    let did = descriptor.did();
+    let mut extensions = followee::contact::ExtensionMap::new();
+    if pad > 0 {
+        extensions.insert(
+            "https://example.com/pad".to_owned(),
+            followee::contact::ExtensionValue::Bytes(vec![0x41; pad]),
+        );
+    }
+    let body = RecordBody {
+        id: did.clone(),
+        timestamp_ms: B4_TIMESTAMP_MS,
+        authority: Authority::Root,
+        descriptor,
+        revocation_key: None,
+        valid_until_ms: None,
+        contact: followee::contact::ContactDocument::default(),
+        extensions,
+    };
+    (
+        did.as_str().to_owned(),
+        sign_record(&body, &root).expect("signs"),
+    )
+}
+
+/// Builds a structurally valid cursor for an arbitrary generation, mirroring
+/// the relay-local encoding (16 generation bytes, 8-byte big-endian
+/// position) from the test side.
+pub fn raw_cursor(generation: &[u8; 16], position: u64) -> Vec<u8> {
+    let mut bytes = generation.to_vec();
+    bytes.extend_from_slice(&position.to_be_bytes());
+    bytes
+}
+
+/// Decodes a publish response into `(status, Option<errorCode>)`.
+pub fn publish_outcome(response: &[u8]) -> (u64, Option<u64>) {
+    let value = decode_value(response);
+    assert_eq!(value.get(0).expect("version").as_uint(), 1);
+    let status = value.get(1).expect("status").as_uint();
+    let code = value.get(2).map(TestValue::as_uint);
+    (status, code)
+}
+
 /// Seals a body with the standard profile using the test-side assembler.
 pub fn seal(payload: &[u8], seed: &[u8; 32]) -> Vec<u8> {
     seal_with_protected(&protected_ed25519(), payload, seed)

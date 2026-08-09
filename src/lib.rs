@@ -3,13 +3,15 @@
 //! Non-normative Rust implementation of the Followee DID method and relay
 //! protocol.
 //!
-//! **Status: Milestone 2 (authoring and inspection CLI) in progress.** This
-//! crate implements the Followee v1 identifier, deterministic CBOR, COSE,
-//! strict Ed25519 verification, record schemas, signing, and ordering rules,
-//! plus the [`cli`] module backing the `followee` binary: identity creation,
-//! record signing and revocation, verification, inspection, deterministic
-//! selection, JSON authoring, and safe local test-key storage. No relay,
-//! resolver, HTTP, or storage code exists yet.
+//! **Status: Milestone 3 (single relay) in progress.** This crate implements
+//! the Followee v1 identifier, deterministic CBOR, COSE, strict Ed25519
+//! verification, record schemas, signing, and ordering rules; the [`cli`]
+//! module backing the `followee` binary (identity creation, record signing
+//! and revocation, verification, inspection, deterministic selection, JSON
+//! authoring, and safe local test-key storage); and the single-relay
+//! protocol core: the [`store`] contract with memory and SQLite backends,
+//! and the [`relay`] admission, resolve, changes, and HTTP/CBOR surfaces.
+//! No resolver, synchronization-receiver, or WebFinger code exists yet.
 //!
 //! The normative authority for protocol behaviour is the pinned Followee
 //! specification in the `followee-protocol/followee` repository, not this
@@ -33,6 +35,8 @@ pub mod limits;
 pub mod ordering;
 pub mod random;
 pub mod record;
+pub mod relay;
+pub mod store;
 pub mod timestamp;
 pub mod verify;
 
@@ -105,5 +109,19 @@ pub mod fuzzing {
         if let Ok(text) = std::str::from_utf8(bytes) {
             let _ = crate::cli::json::contact_from_json(text);
         }
+    }
+
+    /// Parses arbitrary bytes as each relay API request wrapper
+    /// (specification section 12): must never panic, hang, or allocate
+    /// unboundedly.
+    pub fn parse_relay_request(bytes: &[u8]) {
+        let _ = crate::relay::wire::parse_resolve_request(bytes);
+        let _ = crate::relay::wire::parse_changes_request(bytes);
+    }
+
+    /// Decodes arbitrary bytes as an opaque changes cursor against a fixed
+    /// generation.
+    pub fn decode_cursor(bytes: &[u8]) {
+        let _ = crate::relay::cursor::decode(bytes, &[0u8; 16]);
     }
 }
