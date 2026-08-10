@@ -2,8 +2,9 @@
   "_provenance": {
     "description": "Construction provenance for the executable Appendix B.7 negative conformance cases in tests/negative_b7.rs and tests/conformance.rs",
     "derivation_status": "implementation",
-    "spec_version": "v0.8.1",
-    "pinned_commit": "2d5292e95af022af7beee2d154e7217e29907960",
+    "spec_version": "v0.9",
+    "pinned_commit": "13777db64e1eca63796a8f485cf721307d2c3869",
+    "unchanged_note": "the relay-only v0.9 amendment changes no Appendix B byte and no core verification rule; every case construction below is identical to the v0.8.1 bundle (previously pinned at 2d5292e95af022af7beee2d154e7217e29907960)",
     "note": "Cases are constructed programmatically at test time from the specification-status Appendix B fixture values and published seeds; errorAssertion is 'exact' only where the specification assigns the error or the implementation brief fixes it (items 1, 2, 12, 13, 14, 17, and 19; the identityBindingMismatch symbol is normative as of specification v0.4, the section 6.1.1/6.1.2 split fixing items 7-9 is normative as of specification v0.8, and the schema-disallowed simple-value classification fixing item 19 is normative as of specification v0.8.1). Exact assertions marked in the tests but listed here as 'unspecified' constrain this implementation only and are not portable expectations. The five Appendix B.10 basic-validity vectors and the two Appendix B.12 schema-disallowed simple-value vectors are specification-status material recorded in fixtures/specification/appendix_b.json, not here."
   },
   "cases": [

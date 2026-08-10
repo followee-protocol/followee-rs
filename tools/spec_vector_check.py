@@ -9,10 +9,12 @@ to, reused by, or placed in the authoring context of that model's separate
 session. It also uses pyca/cryptography's ordinary Ed25519 verify, which is
 NOT a Followee-strict section 3.3 verifier.
 
-Verified against spec v0.8.1 vectors (Appendix B.2–B.12): 82/82 values
+Verified against spec v0.9 vectors (Appendix B.2–B.12): 82/82 values
 reproduce byte-for-byte, including the B.9 Bob identity, the B.10
 fault-isolated basic-validity signatures, the B.11 wrapper lengths and
 SHA-256 digests, and the B.12 schema-disallowed simple-value signatures.
+The relay-only v0.9 amendment publishes no new Appendix B value and changes
+no existing byte; the checked values are identical to the v0.8.1 vectors.
 Requires: python3 with the `cryptography` package.
 """
 import hashlib

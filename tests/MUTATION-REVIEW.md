@@ -223,3 +223,93 @@ the confirming sweep over `src/cli/mod.rs` reports **37 mutants: 35 caught,
 loopback-guard inversion, the same documented family as the earlier
 development-mode guard timeouts: every test server refuses to start and the
 suite hangs, which CI fails by timeout. No new survivor.
+
+## v0.9 relay-maintenance pass (concurrent-ingress cursor visibility)
+
+The v0.9 amendment is relay-only: it requires update-number assignment,
+accepted-state commitment, and `v1/changes` visibility to form one
+observable order (specification sections 12.6, 13.2, 16.17, 20.2). The
+maintenance audit traced both backends and found the invariant already
+structurally satisfied — every store access serializes through the relay's
+single store lock, `commit_current` (the sole update-number assigner, one
+production call site) allocates the number inside the same atomic operation
+that commits the state, and a failed SQLite commit transaction rolls the
+allocation back.
+
+Maintenance review then corrected the write-critical-section boundary in
+one production module, `src/relay/mod.rs`: `Relay::publish` previously
+acquired the store lock before deterministic-CBOR parsing, record and
+signature verification, and descriptor work, making expensive
+state-independent processing part of the section that excludes competing
+writers and `v1/changes` readers. Publication is now two-phase — phase 1
+runs every bounded state-independent step unlocked through the reviewed
+production verification core into a private `PreparedCandidate` (wrapping
+the unfabricable `VerifiedRecord`, so the locked phase consumes
+verification evidence, never caller metadata), and phase 2 holds the lock
+only for the sticky recheck, current-state comparison, and the atomic
+allocation-and-commit. A `#[doc(hidden)]` test-support gap hook runs
+between the phases; it is `None` in every production construction path,
+receives no protocol data, returns nothing, and executes while no lock is
+held, so it can only delay the calling thread at a point the scheduler may
+already preempt arbitrarily. No other production module changed;
+`src/store/*` and every core module remain byte-identical, so the
+Milestone 1–3 sweeps above remain their applicable evidence.
+
+### Scoped sweep over the changed module
+
+A scoped sweep over `src/relay/mod.rs` (cargo-mutants v27.1.0, `--jobs 6`,
+`PROPTEST_CASES=8`) reported **54 mutants: 34 caught, 6 unviable, 2 missed,
+12 timeouts**. Nothing survives unexplained:
+
+- The 2 missed are the long-documented `RELAY_CAPABILITIES` disjoint-bit
+  `|` -> `^` equivalents from the table above (`0x01 | 0x02 | 0x04` is
+  bit-disjoint, so XOR produces the identical value).
+- All 12 timeouts are one detected-by-hang family: each mutant makes
+  publication inert or inverts an admission decision (`publish` stubbed to
+  a constant, `now_ms` stubbed, the `prepare` size/premature comparisons
+  inverted, the `admit_prepared` sticky-exclusion condition inverted,
+  `claimed_body_id` stubbed, and the previously documented
+  `development_mode` guard family). Under such a mutant the deterministic
+  concurrency orchestration deadlocks — writer A never reaches its gate —
+  and the suite fails through its 60-second hang guard, which exceeds the
+  cargo-mutants per-mutant test timeout; CI equally fails such a build by
+  timeout. Every one of these mutants is therefore detected, not missed.
+
+The sweep ran against the final production sources; the only later edit to
+the module was one documentation-comment line (an intra-doc-link fix),
+which cargo-mutants does not mutate.
+
+### Controlled-fault demonstrations (re-run on the corrected code)
+
+Two hand-injected production faults, each an anti-pattern the v0.9 text
+names, were applied to the corrected implementation, demonstrated, and
+reverted by inverse edit (verified byte-identical afterwards):
+
+1. **Cursor-overtaking fault** (`src/relay/mod.rs`, `changes`): `nextCursor`
+   was computed from `store.last_update_number()` — "the greatest committed
+   or observed update number" section 12.6 forbids — instead of the last
+   included position.
+   `relay_concurrency::sec_12_6_success_cursor_cannot_overtake_a_paused_undecided_writer_memory`
+   and `_sqlite` both failed deterministically: the `itemLimit = 1` walk
+   received cursor position 3 where exactly 2 is conforming, which would
+   permanently skip the omitted eligible entry. 5 of 7 suite tests passed,
+   those 2 failed.
+2. **Reserve-then-commit fault** (`src/store/sqlite.rs`, `commit_current`):
+   the update number was allocated in its own immediately committed write
+   before the entry transaction — the pattern sections 13.2 and 16.17
+   forbid.
+   `relay_concurrency::sec_13_2_sqlite_commit_failure_rolls_back_the_allocated_update_number`
+   failed deterministically: the counter read 1 after the failed entry
+   transaction instead of rolling back to 0, a permanent sequence hole.
+   6 of 7 suite tests passed, that 1 failed.
+
+After reverting each fault, `git diff` confirmed `src/store/sqlite.rs`
+byte-identical to `milestone-3-v0.8.1-reviewed` content and
+`src/relay/mod.rs` carrying only the reviewed two-phase change, and the
+complete concurrency suite (7 tests, both backends) passed. The
+gate-coordinated pause in the gated tests holds the store lock inside
+`commit_current`, so the "no cursor while a writer is undecided" assertions
+are ordering guarantees of the production locking discipline, not timing
+samples; the unlocked-gap tests prove the complementary boundary, that a
+reader completes while another publication is paused after phase-1
+preparation with no lock held.

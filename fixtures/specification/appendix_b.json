@@ -1,11 +1,12 @@
 {
   "_provenance": {
     "source": "followee-protocol/followee Followee-Specification.md Appendix B",
-    "spec_version": "v0.8.1",
-    "pinned_commit": "2d5292e95af022af7beee2d154e7217e29907960",
+    "spec_version": "v0.9",
+    "pinned_commit": "13777db64e1eca63796a8f485cf721307d2c3869",
     "derivation_status": "specification",
     "method": "mechanically extracted from the pinned specification markdown",
-    "spec_sha256": "ad9895d1672e3f4f68dac9e2a92c1d04fb63229c406e67dc1041a5971a361b7d"
+    "spec_sha256": "4d7575d81f15925617185667ebb99b0b098822e738e0840ec5b64d80f35cf96f",
+    "unchanged_note": "the relay-only v0.9 amendment (from v0.8.1 at 2d5292e95af022af7beee2d154e7217e29907960) publishes no new Appendix B value and changes no existing byte; every fixture value below is identical to the v0.8.1 extraction"
   },
   "root_seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
   "root_public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",

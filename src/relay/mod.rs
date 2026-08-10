@@ -8,6 +8,15 @@
 //! decisions delegate to [`crate::ordering`]; time comes only from the
 //! injected [`Clock`]. Storage is behind the [`RelayStore`] contract so the
 //! memory and SQLite backends run identical protocol logic.
+//!
+//! Publication is two-phase (specification v0.9 section 13.2): every
+//! bounded, state-independent step — size bounds, deterministic-CBOR and
+//! schema processing, descriptor binding, strict signature verification,
+//! and the future-bound classification — runs *outside* the store lock,
+//! producing a private prepared-candidate value. The lock is held only for the short
+//! state-dependent critical section: sticky-authority recheck, current-state
+//! comparison, and the atomic update-number allocation-and-commit, after
+//! which the tuple is `v1/changes`-eligible before the lock is released.
 
 pub mod cursor;
 pub mod http;
@@ -97,6 +106,9 @@ pub struct Relay {
     store: Mutex<Box<dyn RelayStore>>,
     clock: Box<dyn Clock + Send + Sync>,
     config: RelayConfig,
+    /// Test-support pause point between phase-1 preparation and the store
+    /// lock; `None` in every production construction path.
+    publish_gap_hook: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl std::fmt::Debug for Relay {
@@ -134,7 +146,24 @@ impl Relay {
             store: Mutex::new(store),
             clock,
             config,
+            publish_gap_hook: None,
         })
+    }
+
+    /// Installs a deterministic test-support hook that `publish` runs after
+    /// phase-1 state-independent preparation and immediately before it
+    /// acquires the store lock.
+    ///
+    /// This exists so concurrency tests can hold a publication in the
+    /// unlocked gap without sleeps. It cannot affect production behaviour:
+    /// no production construction path installs one, the hook receives no
+    /// protocol data and returns nothing — it makes no protocol decision —
+    /// and it runs while no lock is held, so it can only delay the calling
+    /// thread at a point where the scheduler may already preempt it
+    /// arbitrarily.
+    #[doc(hidden)]
+    pub fn set_publish_gap_hook(&mut self, hook: Box<dyn Fn() + Send + Sync>) {
+        self.publish_gap_hook = Some(hook);
     }
 
     /// Whether this relay runs in the explicitly non-conforming development
@@ -254,9 +283,12 @@ impl Relay {
         }
     }
 
-    /// `POST v1/publish` (specification sections 12.5 and 13.1): verify the
-    /// untrusted candidate through the production core, then apply premature,
-    /// sticky-revocation, and ordering rules, committing a winner atomically.
+    /// `POST v1/publish` (specification sections 12.5, 13.1, and 13.2):
+    /// two-phase ingress. Phase 1 verifies the untrusted candidate through
+    /// the production core with no lock held; phase 2 acquires the store
+    /// lock only for the state-dependent admission decision and the atomic
+    /// allocation-and-commit, so a publication mid-verification never
+    /// excludes competing writers or `v1/changes` readers.
     ///
     /// Record-level faults are protocol results (`status 2` with the section
     /// 15.3 code), not HTTP `400`: the record itself is the protocol item,
@@ -268,8 +300,20 @@ impl Relay {
     /// Returns [`RelayError::Internal`] on storage or clock failure.
     pub fn publish(&self, candidate: &[u8]) -> Result<Vec<u8>, RelayError> {
         let now_ms = self.now_ms()?;
+        // Phase 1: every bounded, state-independent step, outside the lock.
+        let prepared = match Self::prepare(candidate, now_ms) {
+            Ok(prepared) => prepared,
+            Err(code) => {
+                return Ok(wire::encode_publish_response(PUBLISH_REJECTED, Some(code)));
+            }
+        };
+        if let Some(hook) = &self.publish_gap_hook {
+            hook();
+        }
+        // Phase 2: the short state-dependent write-critical section.
         let mut store = self.store.lock().map_err(poisoned)?;
-        let outcome = self.admit(&mut **store, candidate, now_ms)?;
+        let outcome = Self::admit_prepared(&mut **store, &prepared)?;
+        drop(store);
         Ok(match outcome {
             AdmissionOutcome::AdmittedCurrent(_) => {
                 wire::encode_publish_response(PUBLISH_ADMITTED, None)
@@ -281,38 +325,42 @@ impl Relay {
         })
     }
 
-    /// Runs the section 13.1 ingress algorithm for one untrusted candidate.
-    fn admit(
-        &self,
-        store: &mut dyn RelayStore,
-        candidate: &[u8],
-        now_ms: u64,
-    ) -> Result<AdmissionOutcome, RelayError> {
+    /// Phase 1 of the section 13.1 ingress algorithm: steps 1–3, every
+    /// bounded, state-independent operation, run with no lock held. On
+    /// rejection, returns the section 15.3 wire error code.
+    fn prepare(candidate: &[u8], now_ms: u64) -> Result<PreparedCandidate, u64> {
         // Step 1: cheap envelope-size limit before deep parsing.
         if candidate.len() > MAX_RECORD_BYTES {
-            return Ok(AdmissionOutcome::Rejected(
-                VerifyError::RecordTooLarge.wire_code(),
-            ));
+            return Err(VerifyError::RecordTooLarge.wire_code());
         }
         // Step 2: the complete section 8.1 verification algorithm, through
         // the reviewed production core. The record's own signed `id` is the
         // publication subject; verification then enforces that the carried
         // descriptor reproduces it.
-        let claimed_id = match claimed_body_id(candidate) {
-            Ok(id) => id,
-            Err(e) => return Ok(AdmissionOutcome::Rejected(e.wire_code())),
-        };
-        let verified = match crate::verify::verify_record_for_target(&claimed_id, candidate) {
-            Ok(verified) => verified,
-            Err(e) => return Ok(AdmissionOutcome::Rejected(e.wire_code())),
-        };
+        let claimed_id = claimed_body_id(candidate).map_err(|e| e.wire_code())?;
+        let verified = crate::verify::verify_record_for_target(&claimed_id, candidate)
+            .map_err(|e| e.wire_code())?;
 
         // Step 3: reject a premature record rather than retain a future
-        // queue (specification section 5.4).
+        // queue (specification section 5.4). The bound depends on the
+        // injected clock, never on relay state.
         if time_status(verified.timestamp_ms(), now_ms) == TimeStatus::Premature {
-            return Ok(AdmissionOutcome::Rejected(wire_code::PREMATURE));
+            return Err(wire_code::PREMATURE);
         }
+        Ok(PreparedCandidate { verified })
+    }
 
+    /// Phase 2 of the section 13.1 ingress algorithm: steps 4–8, the
+    /// state-dependent write-critical section, run with the store lock held.
+    /// It consumes only the verification evidence carried by `prepared`;
+    /// every state-dependent condition is decided here, atomically with the
+    /// update-number allocation-and-commit (specification v0.9 sections
+    /// 12.6 and 13.2).
+    fn admit_prepared(
+        store: &mut dyn RelayStore,
+        prepared: &PreparedCandidate,
+    ) -> Result<AdmissionOutcome, RelayError> {
+        let verified = &prepared.verified;
         let entry = store.entry(verified.body().id.as_str())?;
 
         // Step 4: sticky exclusion. Section 13.1 "drops" a Root record when
@@ -349,7 +397,9 @@ impl Relay {
         }
 
         // Steps 5 and 8: atomically persist the winner, its authority state,
-        // and a new relay-local update number before acknowledging.
+        // and a new relay-local update number — assigned only inside this
+        // committing operation — before acknowledging; the tuple is
+        // `v1/changes`-eligible before the lock is released.
         let authority_state = match verified.authority() {
             Authority::Root => AuthorityState::Root,
             Authority::RootRevoked => AuthorityState::RootRevoked,
@@ -467,6 +517,16 @@ impl Relay {
         let mut store = self.store.lock().map_err(poisoned)?;
         operation(&mut **store).map_err(RelayError::from)
     }
+}
+
+/// A candidate that has completed every bounded, state-independent
+/// admission step (section 13.1 steps 1–3) through the reviewed production
+/// verification core, outside the store lock. Only [`Relay::prepare`]
+/// constructs one — [`crate::verify::VerifiedRecord`] is itself
+/// unfabricable — so the locked phase consumes verification evidence,
+/// never caller-supplied metadata.
+struct PreparedCandidate {
+    verified: crate::verify::VerifiedRecord,
 }
 
 /// The section 13.1 admission outcome.

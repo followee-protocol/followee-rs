@@ -3,7 +3,7 @@
 Ambiguities identified in the normative specification
 (`followee-protocol/followee`), tracked against the pinned commit in
 IMPLEMENTATION.md section 2 (currently
-`2d5292e95af022af7beee2d154e7217e29907960`, specification v0.8.1). Per
+`13777db64e1eca63796a8f485cf721307d2c3869`, specification v0.9). Per
 IMPLEMENTATION.md section 2, questions are resolved in the protocol repository
 — never silently in this implementation — and no milestone may pass while an
 open question affects code delivered by that milestone. Resolving a question
@@ -11,7 +11,7 @@ that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
 **All recorded questions are resolved**, and every resolution remains in
-force in specification v0.8.1 at the pinned commit. Each resolved entry cites
+force in specification v0.9 at the pinned commit. Each resolved entry cites
 the amending version and records the test obligation the resolution creates.
 
 ---
@@ -370,6 +370,61 @@ new rejection path.
 `negative_b7::sec_b7_item19_schema_disallowed_simple_values_are_exact_schema_violation`,
 `sec_b7_item19_undefined_extension_value_remains_non_deterministic_cbor`,
 `sec_b7_item19_simple_values_rejected_wherever_the_schema_expects_other_types`.
+
+## SQ-16 — Concurrent-ingress cursor visibility: can a successful `nextCursor` pass an undecided update?
+
+**Status:** resolved (spec v0.9, commit `13777db`) · **Affected:** Milestone 3 relay (maintenance) · **Spec:** sections 12.6, 13.2, 16.17, 20.2
+
+Specification v0.8.1 section 12.6 forbade advancing `nextCursor` past an
+*omitted eligible* entry, and section 13.2 assigned update numbers only to
+winning admissions, but neither stated how update-number order relates to
+`v1/changes` visibility under concurrent ingress. An implementation that
+allocates a number and commits the corresponding state later — in separate
+steps, transactions, or writer connections — lets a reader return a cursor
+at the greatest *visible* number while a lower-numbered admission is still
+undecided; if that admission later commits, every client that took the
+cursor has permanently skipped it, and neither side can detect the
+omission. Resolved by the v0.9 amendment:
+
+1. section 12.6 makes cursors visibility-safe: once a successful response
+   returns `nextCursor`, no current tuple at or before that position may
+   subsequently become visible unless it was already visible when the
+   response was assembled, and a relay MUST NOT return a cursor beyond any
+   position whose eventual visibility remains undecided;
+2. section 13.2 step 8 adds `v1/changes` eligibility to the atomic winning
+   commit, and a new paragraph requires assignment, commitment, and
+   visibility to satisfy the section 12.6 invariant, while expensive
+   candidate work SHOULD stay outside the write-critical section;
+3. section 16.17 records the overtaking hazard and names the conforming
+   strategies (serialized assignment through commit, an allocation lock
+   held to commit, or a contiguous visibility watermark); and
+4. section 20.2 adds a deterministic concurrent-ingress interleaving test
+   obligation.
+
+The Milestone 3 implementation already satisfied the invariant
+structurally: every store access serializes through the relay's single
+store lock, `commit_current` is the sole update-number assigner, and it
+allocates the number inside the same atomic operation (SQLite transaction;
+single in-memory mutation) that commits the state, so no allocated number
+can ever be observed uncommitted. Maintenance review additionally corrected
+the lock boundary to honour the section 13.2 SHOULD: `Relay::publish` had
+acquired the store lock before verification, making expensive
+state-independent work part of the write-critical section and letting one
+slow publication deny readers service. Publication is now two-phase —
+phase 1 (size bounds, deterministic CBOR, schema, descriptor binding,
+strict signature, future-bound classification under the injected clock)
+runs with no lock held and produces a private `PreparedCandidate` wrapping
+the unfabricable `VerifiedRecord`; phase 2 holds the lock only for the
+sticky recheck, current-state comparison, and the atomic
+allocation-and-commit, whose tuple is `v1/changes`-eligible before the lock
+is released. No update number is allocated before the locked commit, so
+the visibility invariant is unchanged.
+
+**Test obligations (v0.9 maintenance, done):**
+`relay_concurrency::sec_12_6_success_cursor_cannot_overtake_a_paused_undecided_writer_memory`/`_sqlite`,
+`sec_12_6_cancelled_writer_creates_no_permanently_blocking_hole_memory`/`_sqlite`,
+`sec_13_2_sqlite_commit_failure_rolls_back_the_allocated_update_number`,
+`sec_13_2_reader_completes_while_a_publication_prepares_unlocked_memory`/`_sqlite`.
 
 ---
 
