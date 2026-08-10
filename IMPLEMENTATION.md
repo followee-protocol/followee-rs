@@ -34,7 +34,7 @@ The v0.8 amendment preserves the earlier Alice positive vectors but changes norm
 
 The v0.8.1 amendment is deliberately narrow. It clarifies that a well-formed, basically valid, deterministically encoded CBOR simple value not admitted by a v1 schema is a schema fault, not a deterministic-profile fault, and adds the two signed Appendix B.12 vectors. A previous green result against v0.8 remains useful evidence but is not a v0.8.1 result. Rust and Python must again be maintained independently from the pinned text before the neutral harness is re-pinned. The complete v0.8.1 suite must be rerun; no prior result, fixture promotion or disagreement count is inherited automatically.
 
-The v0.9 amendment is relay-only. It closes the concurrent-ingress cursor-overtaking hazard by requiring update-number assignment, state commitment and changes-feed visibility to form one observable order. Sections 3 through 8, every record and envelope byte, and Appendix B.2 through B.12 are unchanged. The reviewed v0.8.1 Rust core, clean-room model, 218-of-218 differential result and 53 confirmed fixtures therefore remain applicable evidence for that unchanged core; they are not rewritten or relabelled as newly derived v0.9 evidence. Before Milestone 4 begins, the Rust relay must be maintained from `milestone-3-v0.8.1-reviewed`, pinned to v0.9, audited for the new invariant, and subjected to the complete Milestones 1 through 3 gate plus the deterministic concurrency test required below. A new clean-room core-model maintenance pass is not required solely for this amendment because the model's Sections 3-through-8 scope did not change. Future relay-level conformance work must pin v0.9.
+The v0.9 amendment is relay-only. It closes the concurrent-ingress cursor-overtaking hazard by requiring update-number assignment, state commitment and changes-feed visibility to form one observable order. Sections 3 through 8, every record and envelope byte, and Appendix B.2 through B.12 are unchanged. The reviewed v0.8.1 Rust core, clean-room model, 218-of-218 differential result and 53 confirmed fixtures therefore remain applicable evidence for that unchanged core; they are not rewritten or relabelled as newly derived v0.9 evidence. The bounded Rust relay maintenance pass is reviewed at `497d57c1b1fce53b1e4c89747ef454d6b3f9a7b5` (`milestone-3-v0.9-reviewed`): it audits the invariant against both production backends, moves expensive state-independent verification outside the relay write-critical section, and adds deterministic concurrency and controlled-fault evidence while preserving all prior Milestone 2 and 3 behaviour. A new clean-room core-model maintenance pass is not required solely for this amendment because the model's Sections 3-through-8 scope did not change. Future relay-level conformance work must pin v0.9.
 
 ## 3. Implementation status and naming
 
@@ -46,7 +46,7 @@ It is the first implementation but is not a privileged “reference truth.” Pu
 
 The later `followee-icp` implementation is expected to be independently written in Motoko and to consume the same external conformance fixtures without sharing protocol implementation code.
 
-Reviewed Rust milestones 0 through 3 are complete through tag `milestone-3-v0.8.1-reviewed` at `ff281c9966e7d8f6897d495c7214354aa4c2f552`. The next work item is the bounded v0.9 relay-maintenance gate described in this brief; Milestone 4 must not begin until that gate is reviewed.
+Reviewed Rust milestones 0 through 3 are complete and maintained to v0.9 through tag `milestone-3-v0.9-reviewed` at `497d57c1b1fce53b1e4c89747ef454d6b3f9a7b5`. The next work item is Milestone 4: the resolver and relay network.
 
 ## 4. Scope
 
@@ -875,7 +875,7 @@ Acceptance:
 - resolve distinguishes Absent from a retained but presently premature record;
 - successful `changes` responses never exceed the request's `itemLimit` and never advance past an omitted eligible entry;
 - `changes` uses the exact two-field status-`1` response as the sole ResetRequired signal, forbids labels `2` through `6` in that response, and enforces every other status-dependent field rule;
-- `followee relay serve` accepts a SQLite path, uses the operating-system clock and CSPRNG, defaults to loopback with port-`0` reporting, emits one machine-readable startup object, refuses non-loopback development binding, shuts down cleanly on signals, and preserves relay identity and generations across restart; client-side `relay publish`, `relay resolve` and `relay changes` commands remain later work;
+- `followee relay serve` accepts a SQLite path, uses the operating-system clock and CSPRNG, defaults to loopback with port-`0` reporting, emits one machine-readable startup object, refuses non-loopback development binding, shuts down cleanly on signals, and preserves relay identity and generations across restart; client-side `relay publish`, `relay resolve` and `relay changes` commands are assigned to Milestone 4;
 - restart preserves identity, generation and sticky authority state; and
 - malformed and oversized input is bounded before expensive processing.
 
@@ -887,7 +887,8 @@ Deliver:
 - reference traversal and cycle detection;
 - current-state synchronization;
 - peer cursor persistence;
-- lazy path compression; and
+- lazy path compression;
+- minimal non-interactive `followee relay publish`, `followee relay resolve`, `followee relay changes` and multi-relay `followee resolve` commands with machine-readable output; and
 - a deterministic three-relay local demonstration.
 
 Acceptance:
@@ -902,8 +903,10 @@ Acceptance:
 - Absent and Error results cannot alter cached identity or sticky RootRevoked state;
 - Appendix B.11.5 advances the peer cursor to the exact returned `nextCursor` after rejecting Alice and admitting Bob, leaving Alice byte-for-byte unchanged and assigning only Bob's local update;
 - Appendix B.11.7's three-entry response to `itemLimit = 2` is rejected before any entry is processed, leaving identity state, update counter and stored peer cursor unchanged;
-- cycles and unavailable peers terminate within shared budgets; and
-- synchronized invalid or losing input does not alter current state.
+- cycles and unavailable peers terminate within shared budgets;
+- synchronized invalid or losing input does not alter current state;
+- the direct relay commands exercise the production HTTP/CBOR client path, while `followee resolve` exercises the production multi-relay resolver rather than reproducing protocol decisions in CLI code; and
+- a shell-level demonstration starts three loopback relay processes with isolated SQLite databases and exercises synchronization and resolution through the production binary surfaces, not only in-process library calls.
 
 ### Milestone 5: handles and public demonstration
 
