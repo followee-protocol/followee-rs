@@ -21,6 +21,10 @@ allow = [
     "ISC",
     "Unicode-3.0",
     "Zlib",
+    # webpki-roots: the Mozilla CA root-store *data* bundled for rustls
+    # (Milestone 4 TLS-capable client). CDLA-Permissive-2.0 is a permissive
+    # data licence; the code carrying it remains MIT/Apache/ISC.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.93
 

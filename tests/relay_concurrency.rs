@@ -150,6 +150,21 @@ impl RelayStore for GatedStore {
     fn reset_cursor_generation(&mut self, new_generation: [u8; 16]) -> Result<(), StoreError> {
         self.inner.reset_cursor_generation(new_generation)
     }
+
+    fn peer_state(
+        &self,
+        relay_id: &[u8; 16],
+    ) -> Result<Option<followee::store::PeerState>, StoreError> {
+        self.inner.peer_state(relay_id)
+    }
+
+    fn set_peer_state(&mut self, state: &followee::store::PeerState) -> Result<(), StoreError> {
+        self.inner.set_peer_state(state)
+    }
+
+    fn peer_states(&self) -> Result<Vec<followee::store::PeerState>, StoreError> {
+        self.inner.peer_states()
+    }
 }
 
 /// A gated production relay plus the orchestration endpoints.

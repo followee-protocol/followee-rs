@@ -18,8 +18,10 @@
 //! comparison, and the atomic update-number allocation-and-commit, after
 //! which the tuple is `v1/changes`-eligible before the lock is released.
 
+pub mod client;
 pub mod cursor;
 pub mod http;
+pub mod sync;
 pub mod wire;
 
 use crate::clock::Clock;

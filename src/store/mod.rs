@@ -131,6 +131,28 @@ pub struct ChangeRow {
     pub last_updated: u64,
 }
 
+/// Persisted synchronization state for one peer relay (specification
+/// sections 12.7 and 13.3; IMPLEMENTATION.md section 9.2).
+///
+/// The peer is identified by its stable 16-byte relay instance identifier,
+/// not by its endpoint: a cursor is meaningful only to the relay instance
+/// that issued it, so an endpoint change under the same identifier keeps the
+/// cursor, while a different identifier at the same endpoint is a different
+/// peer whose state is independent. Cursor-generation changes are signalled
+/// by the peer itself (`ResetRequired`) and clear only the cursor, never
+/// independently verified local identity state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerState {
+    /// The peer's stable 16-byte relay instance identifier.
+    pub relay_id: [u8; 16],
+    /// The base URI the peer was last synchronized from.
+    pub endpoint: String,
+    /// The exact opaque cursor bytes returned by the peer's last accepted
+    /// `v1/changes` success response, or `None` before the first success or
+    /// after a cursor-generation reset.
+    pub cursor: Option<Vec<u8>>,
+}
+
 /// The storage contract shared by every backend.
 ///
 /// All mutating operations must be atomic and durable to the backend's
@@ -237,6 +259,33 @@ pub trait RelayStore: Send {
     ///
     /// Returns [`StoreError`] when the backend cannot persist the change.
     fn reset_cursor_generation(&mut self, new_generation: [u8; 16]) -> Result<(), StoreError>;
+
+    /// Loads the persisted synchronization state for the peer with this
+    /// relay instance identifier, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] when the backend cannot read its state.
+    fn peer_state(&self, relay_id: &[u8; 16]) -> Result<Option<PeerState>, StoreError>;
+
+    /// Atomically inserts or replaces the synchronization state for
+    /// `state.relay_id`, durable before returning: the peer cursor is
+    /// persisted only after the response's accepted entries were durably
+    /// processed, so a crash replays a range safely instead of skipping it
+    /// (specification section 13.3).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] when the backend cannot persist the change.
+    fn set_peer_state(&mut self, state: &PeerState) -> Result<(), StoreError>;
+
+    /// Every persisted peer synchronization state, in ascending
+    /// relay-identifier order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] when the backend cannot read its state.
+    fn peer_states(&self) -> Result<Vec<PeerState>, StoreError>;
 }
 
 /// Volatile in-memory backend.
@@ -245,6 +294,7 @@ pub struct MemoryStore {
     identity: RelayIdentity,
     entries: BTreeMap<String, StoredEntry>,
     directory: Vec<DirectoryEntry>,
+    peers: BTreeMap<[u8; 16], PeerState>,
     next_update_number: u64,
 }
 
@@ -256,6 +306,7 @@ impl MemoryStore {
             identity,
             entries: BTreeMap::new(),
             directory: Vec::new(),
+            peers: BTreeMap::new(),
             next_update_number: 1,
         }
     }
@@ -360,5 +411,18 @@ impl RelayStore for MemoryStore {
     fn reset_cursor_generation(&mut self, new_generation: [u8; 16]) -> Result<(), StoreError> {
         self.identity.cursor_generation = new_generation;
         Ok(())
+    }
+
+    fn peer_state(&self, relay_id: &[u8; 16]) -> Result<Option<PeerState>, StoreError> {
+        Ok(self.peers.get(relay_id).cloned())
+    }
+
+    fn set_peer_state(&mut self, state: &PeerState) -> Result<(), StoreError> {
+        self.peers.insert(state.relay_id, state.clone());
+        Ok(())
+    }
+
+    fn peer_states(&self) -> Result<Vec<PeerState>, StoreError> {
+        Ok(self.peers.values().cloned().collect())
     }
 }

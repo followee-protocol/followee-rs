@@ -16,6 +16,7 @@
 
 pub mod json;
 pub mod keyfile;
+mod network;
 
 use crate::clock::Clock;
 use crate::did::FolloweeDid;
@@ -88,6 +89,29 @@ pub enum CliError {
     /// The injected clock or randomness source failed.
     #[error("environment failure: {0}")]
     Environment(String),
+    /// The production relay client failed; the layer that failed (policy,
+    /// transport, HTTP status, rejected outer response, budget) is
+    /// preserved in the symbol.
+    #[error("relay client failure: {0}")]
+    Client(#[from] crate::relay::client::ClientError),
+    /// The synchronization receiver failed.
+    #[error("synchronization failed: {0}")]
+    Sync(#[from] crate::relay::sync::SyncError),
+    /// The relay rejected the published record: a protocol rejection,
+    /// distinct from transport or local infrastructure failure.
+    #[error("relay rejected the record{0}")]
+    PublishRejected(String),
+    /// The resolution operation completed without a winning record. The
+    /// complete machine-readable resolution is carried alongside the
+    /// symbolic failure.
+    #[error("resolution failed: {symbol}")]
+    ResolutionFailed {
+        /// `notFound` or `temporarilyUnavailable` (specification
+        /// section 15.5).
+        symbol: &'static str,
+        /// The complete resolution result object.
+        detail: Box<Value>,
+    },
 }
 
 impl CliError {
@@ -118,6 +142,10 @@ impl CliError {
             CliError::OutputExists(_) => "outputExists",
             CliError::Io { .. } => "io",
             CliError::Environment(_) => "environment",
+            CliError::Client(e) => e.symbol(),
+            CliError::Sync(e) => e.symbol(),
+            CliError::PublishRejected(_) => "publishRejected",
+            CliError::ResolutionFailed { symbol, .. } => symbol,
         }
     }
 }
@@ -144,12 +172,41 @@ enum TopCommand {
     /// Relay operations.
     #[command(subcommand)]
     Relay(RelayCommand),
+    /// Resolve a DID through the multi-relay production resolver.
+    Resolve(ResolveArgs),
 }
 
 #[derive(Subcommand, Debug)]
 enum RelayCommand {
     /// Run the single bounded relay over a SQLite database.
     Serve(ServeArgs),
+    /// Publish one complete Identity Record to a relay.
+    Publish(RelayPublishArgs),
+    /// Resolve DIDs directly against one relay.
+    Resolve(RelayResolveArgs),
+    /// Fetch one page of a relay's current-state changes feed.
+    Changes(RelayChangesArgs),
+    /// Run one explicit synchronization pass from a peer's changes feed
+    /// into a local relay database.
+    Sync(RelaySyncArgs),
+}
+
+/// Explicit network policy selection (IMPLEMENTATION.md section 9.5).
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum PolicyArg {
+    /// Default public policy: HTTPS to public destinations only.
+    Public,
+    /// Explicitly non-conforming loopback development policy.
+    Development,
+}
+
+impl PolicyArg {
+    fn policy(self) -> crate::relay::client::NetworkPolicy {
+        match self {
+            PolicyArg::Public => crate::relay::client::NetworkPolicy::Public,
+            PolicyArg::Development => crate::relay::client::NetworkPolicy::Development,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -264,6 +321,114 @@ struct SelectArgs {
 }
 
 #[derive(Args, Debug)]
+struct RelayPublishArgs {
+    /// The relay base URI, ending in `/`.
+    #[arg(long)]
+    relay: String,
+    /// The complete COSE record file to publish.
+    #[arg(long)]
+    record: PathBuf,
+    /// Network policy for the connection.
+    #[arg(long, value_enum, default_value_t = PolicyArg::Public)]
+    policy: PolicyArg,
+    /// Per-request timeout in milliseconds.
+    #[arg(long, default_value_t = 10_000)]
+    timeout_ms: u64,
+}
+
+#[derive(Args, Debug)]
+struct RelayResolveArgs {
+    /// The relay base URI, ending in `/`.
+    #[arg(long)]
+    relay: String,
+    /// Requested DIDs, order and duplicates preserved exactly.
+    #[arg(long = "did", required = true)]
+    dids: Vec<String>,
+    /// Network policy for the connection.
+    #[arg(long, value_enum, default_value_t = PolicyArg::Public)]
+    policy: PolicyArg,
+    /// Per-request timeout in milliseconds.
+    #[arg(long, default_value_t = 10_000)]
+    timeout_ms: u64,
+    /// Recipient time override for deterministic classification.
+    #[arg(long)]
+    now_ms: Option<u64>,
+}
+
+#[derive(Args, Debug)]
+struct RelayChangesArgs {
+    /// The relay base URI, ending in `/`.
+    #[arg(long)]
+    relay: String,
+    /// Opaque cursor bytes as hex; omitted for an initial enumeration.
+    #[arg(long)]
+    cursor: Option<String>,
+    /// Requested `itemLimit` (1..=1024).
+    #[arg(long, default_value_t = 256)]
+    item_limit: u64,
+    /// Requested `byteLimit` (1..=4194304).
+    #[arg(long, default_value_t = 1_048_576)]
+    byte_limit: u64,
+    /// Network policy for the connection.
+    #[arg(long, value_enum, default_value_t = PolicyArg::Public)]
+    policy: PolicyArg,
+    /// Per-request timeout in milliseconds.
+    #[arg(long, default_value_t = 10_000)]
+    timeout_ms: u64,
+}
+
+#[derive(Args, Debug)]
+struct RelaySyncArgs {
+    /// The local relay SQLite database to synchronize into.
+    #[arg(long)]
+    database: PathBuf,
+    /// The peer relay base URI, ending in `/`.
+    #[arg(long)]
+    peer: String,
+    /// Network policy for the connection.
+    #[arg(long, value_enum, default_value_t = PolicyArg::Public)]
+    policy: PolicyArg,
+    /// `itemLimit` per changes request (1..=1024).
+    #[arg(long, default_value_t = 256)]
+    item_limit: u64,
+    /// `byteLimit` per changes request (1..=4194304).
+    #[arg(long, default_value_t = 1_048_576)]
+    byte_limit: u64,
+    /// Maximum feed pages fetched in this pass.
+    #[arg(long, default_value_t = 16)]
+    max_pages: u32,
+    /// Per-request timeout in milliseconds.
+    #[arg(long, default_value_t = 10_000)]
+    timeout_ms: u64,
+    /// Receiver time override for deterministic admission classification.
+    #[arg(long)]
+    now_ms: Option<u64>,
+}
+
+#[derive(Args, Debug)]
+struct ResolveArgs {
+    /// The target DID to resolve.
+    #[arg(long)]
+    did: String,
+    /// Configured relay base URIs, queried in order.
+    #[arg(long = "relay", required = true)]
+    relays: Vec<String>,
+    /// Network policy for connections.
+    #[arg(long, value_enum, default_value_t = PolicyArg::Public)]
+    policy: PolicyArg,
+    /// Optional client-state file: sticky authority state, cached verified
+    /// records, and routing hints persist across invocations.
+    #[arg(long)]
+    state: Option<PathBuf>,
+    /// Recipient time override for deterministic classification.
+    #[arg(long)]
+    now_ms: Option<u64>,
+    /// Resolution deadline duration in milliseconds.
+    #[arg(long, default_value_t = 10_000)]
+    deadline_ms: u64,
+}
+
+#[derive(Args, Debug)]
 struct ServeArgs {
     /// SQLite database path; created on first use, reopened thereafter.
     #[arg(long)]
@@ -313,9 +478,16 @@ pub fn run(
         // startup object) and finished cleanly.
         Ok(None) => 0,
         Err(error) => {
-            let payload = json!({
+            let mut payload = json!({
                 "error": { "symbol": error.symbol(), "message": error.to_string() }
             });
+            // A completed-but-unsuccessful resolution still emits its one
+            // complete machine-readable result alongside the symbol.
+            if let CliError::ResolutionFailed { detail, .. } = &error {
+                if let Some(object) = payload.as_object_mut() {
+                    object.insert("resolution".to_owned(), (**detail).clone());
+                }
+            }
             let _ = writeln!(stdout, "{payload}");
             let _ = writeln!(stderr, "error[{}]: {error}", error.symbol());
             if matches!(error, CliError::Usage(_)) {
@@ -348,6 +520,17 @@ fn dispatch(
         TopCommand::Record(RecordCommand::Inspect(args)) => inspect(&args, clock).map(Some),
         TopCommand::Record(RecordCommand::Select(args)) => select(&args, clock).map(Some),
         TopCommand::Relay(RelayCommand::Serve(args)) => relay_serve(&args, rng, stdout, stderr),
+        TopCommand::Relay(RelayCommand::Publish(args)) => {
+            network::relay_publish(&args, clock).map(Some)
+        }
+        TopCommand::Relay(RelayCommand::Resolve(args)) => {
+            network::relay_resolve(&args, clock).map(Some)
+        }
+        TopCommand::Relay(RelayCommand::Changes(args)) => {
+            network::relay_changes(&args, clock).map(Some)
+        }
+        TopCommand::Relay(RelayCommand::Sync(args)) => network::relay_sync(&args, rng).map(Some),
+        TopCommand::Resolve(args) => network::resolve_multi(&args, clock).map(Some),
     }
 }
 

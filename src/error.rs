@@ -87,6 +87,36 @@ impl VerifyError {
     }
 }
 
+/// The symbolic name for any section 15.3 wire error code, or `None` for a
+/// code outside the v1 table. Used to render received per-DID and publish
+/// error codes; never to reinterpret them.
+#[must_use]
+pub fn wire_error_symbol(code: u64) -> Option<&'static str> {
+    Some(match code {
+        0 => "invalidDid",
+        1 => "unsupportedHash",
+        2 => "unsupportedSuite",
+        3 => "recordTooLarge",
+        4 => "invalidCbor",
+        5 => "nonDeterministicCbor",
+        6 => "schemaViolation",
+        7 => "identityBindingMismatch",
+        8 => "invalidRevocationKey",
+        9 => "invalidSignature",
+        10 => "premature",
+        11 => "rootRevoked",
+        12 => "losingRecord",
+        13 => "duplicate",
+        14 => "policyRejected",
+        15 => "rateLimited",
+        16 => "responseTooLarge",
+        17 => "temporarilyUnavailable",
+        18 => "invalidCursor",
+        19 => "internalError",
+        _ => return None,
+    })
+}
+
 impl From<CborError> for VerifyError {
     fn from(e: CborError) -> Self {
         match e {
@@ -109,6 +139,37 @@ impl From<DidError> for VerifyError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sec_15_3_wire_error_symbol_table_is_exhaustive_and_exact() {
+        let table: [(u64, &str); 20] = [
+            (0, "invalidDid"),
+            (1, "unsupportedHash"),
+            (2, "unsupportedSuite"),
+            (3, "recordTooLarge"),
+            (4, "invalidCbor"),
+            (5, "nonDeterministicCbor"),
+            (6, "schemaViolation"),
+            (7, "identityBindingMismatch"),
+            (8, "invalidRevocationKey"),
+            (9, "invalidSignature"),
+            (10, "premature"),
+            (11, "rootRevoked"),
+            (12, "losingRecord"),
+            (13, "duplicate"),
+            (14, "policyRejected"),
+            (15, "rateLimited"),
+            (16, "responseTooLarge"),
+            (17, "temporarilyUnavailable"),
+            (18, "invalidCursor"),
+            (19, "internalError"),
+        ];
+        for (code, symbol) in table {
+            assert_eq!(wire_error_symbol(code), Some(symbol), "code {code}");
+        }
+        assert_eq!(wire_error_symbol(20), None, "codes outside the v1 table");
+        assert_eq!(wire_error_symbol(u64::MAX), None);
+    }
 
     #[test]
     fn sec_15_3_symbols_and_wire_codes_are_exhaustive_and_exact() {

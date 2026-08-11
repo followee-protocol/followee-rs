@@ -1,4 +1,4 @@
-# Requirement traceability (Milestones 1–3)
+# Requirement traceability (Milestones 1–4)
 
 Mapping from testable MUST/MUST NOT requirements in the implemented
 specification sections (pinned commit in IMPLEMENTATION.md §2) to tests.
@@ -8,9 +8,10 @@ authoring, custody, and inspection obligations from IMPLEMENTATION.md
 sections 7.4, 7.5, 8, and 13 (Milestone 2); the relay sections 5.4
 (serving), 11–13, 15.2–15.4, and 20.2 (Milestone 3); and the v0.9
 concurrent-ingress cursor-visibility obligations (§12.6, §13.2, §20.2,
-relay-maintenance pass); resolver,
-synchronization-receiver, WebFinger and DID-document-projection sections
-arrive with their milestones.
+relay-maintenance pass); and the Milestone 4 relay client, synchronization
+receiver, and multi-relay resolver (§§11.5, 12.1, 12.3, 12.6, 12.7, 13.3,
+14.1, 15.5, Appendix B.11 behavioural gates). WebFinger and
+DID-document-projection sections arrive with their milestones.
 
 | Spec | Requirement | Tests |
 | --- | --- | --- |
@@ -115,10 +116,39 @@ arrive with their milestones.
 | IMPL §13 M3 | `followee relay serve`: SQLite path, loopback default with port 0 reporting the assigned port, one machine-readable startup object (bound address + relay identity) with stdout otherwise reserved, dev-mode loopback refusal retained, clean SIGTERM shutdown, identity/generation persistence across restart | `relay_serve_shell::relay_serve_startup_info_shutdown_and_restart_persistence` |
 | IMPL §9.5 | Development mode is loopback-only; conforming mode requires HTTPS base URI | `relay_http::impl_9_5_development_mode_refuses_non_loopback_binding`, `impl_9_5_conforming_config_requires_https_or_explicit_dev_mode` |
 
-Known intentional gaps at this milestone: client/resolver behaviour (§§9.2,
-9.6, 14), the synchronization receiver and peer cursors (§13.3, Milestone 4
-halves of B.11.2/B.11.3/B.11.5/B.11.7), WebFinger (§10), and the remote
-signer (§18) are later-milestone scope. `validUntil` staleness interacts
-with selection only through
-`authority::sec_8_2_stale_root_revoked_still_activates_transition`;
-richer freshness policy is client-milestone scope.
+## Milestone 4: relay client, synchronization receiver, and resolver
+
+| Spec | Requirement | Tests |
+| --- | --- | --- |
+| §12.1 | Exact operation paths, methods, and media types on the client path; response media type enforced | `relay_client::sec_12_1_operations_use_exact_paths_methods_and_media_types`, `sec_12_1_response_media_type_must_be_cbor`; real HTTP in `client_http::sec_12_1_full_round_trip_over_real_http` |
+| §12.1 | Every outer response validated as one well-formed, basically valid, deterministic CBOR item before schema interpretation; rejection is never Absent and never a per-DID Error | `relay_client::sec_b11_2_non_deterministic_outer_response_is_rejected_not_absent`, `resolution::sec_b11_2_rejected_outer_response_does_not_terminate_or_become_absent`, `sec_b11_2_rejected_outer_response_mutates_no_state` |
+| §12.1 | Byte strings inside accepted wrappers stay opaque; Full candidates are not recursively validated during wrapper parsing | `relay_client::sec_b11_3_wrapper_accepts_and_only_the_invalid_candidate_is_discarded` (the wrapper containing the invalid B.8 envelope is accepted); `b11_vectors` opacity assertions retained |
+| §12.3 | Request order and duplicates preserved; result count must equal request count or the complete response is rejected, with no Absent inference | `relay_client::sec_b11_3_client_emits_the_exact_published_resolve_request_bytes`, `sec_b11_4_result_count_mismatch_rejects_the_complete_response` |
+| §12.3 | Each result interpreted against the DID at its request index; an invalid Full candidate is discarded alone, without shifting later results | `relay_client::sec_b11_3_wrapper_accepts_and_only_the_invalid_candidate_is_discarded`, `resolution::sec_14_1_rejected_candidate_is_positional_and_other_relays_still_win` |
+| §12.3 | A Ref is interpreted only with the response's directory generation; a changed generation makes the index unusable | `resolution::sec_12_3_mismatched_directory_generation_makes_the_reference_unusable` |
+| §12.6 | Client-side status-dependent required/forbidden fields, exact two-field ResetRequired, over-`itemLimit` and over-`byteLimit` complete rejection, strictly increasing `lastUpdated` (SQ-18) | `relay_client::sec_12_6_exact_reset_required_response_is_accepted_and_extra_labels_reject`, `sec_12_6_success_and_error_status_field_rules_are_enforced`, `sec_12_6_over_item_limit_response_is_rejected_before_any_entry`, `sec_12_6_over_byte_limit_changes_response_is_rejected`, `sec_12_6_misordered_last_updated_rejects_the_complete_response` |
+| §12.7 | ResetRequired discards only the peer cursor and re-enumerates from null; identity state is never deleted; `invalidCursor` stays distinct and keeps the cursor | `sync_receiver::sec_12_7_reset_required_discards_only_the_cursor_and_reenumerates`, `sec_12_7_repeated_reset_in_one_operation_fails`, `sec_15_3_invalid_cursor_error_is_distinct_from_reset_and_keeps_the_cursor` |
+| §12.7/§12.2 | Peer synchronization state is keyed by the stable relay instance identifier (SQ-19): endpoint change keeps the cursor, identifier change starts fresh | `sync_receiver::sec_12_7_peer_identity_is_the_relay_id_not_the_endpoint`, `sec_12_7_endpoint_change_keeps_the_same_peer_cursor` |
+| §13.3 | Full change entries run the ordinary ingress algorithm (no second verifier/ordering/update-number path; `commit_current` remains the sole assigner); Refs are unverified routing hints, never imported authority | `sync_receiver::sec_b11_5_cursor_advances_exactly_and_only_bob_receives_an_update`, `sec_13_3_ref_entries_are_discarded_routing_hints`; ingress reuse is by construction (`Relay::prepare`/`admit_prepared` in `relay/sync.rs`) |
+| §13.3 | The exact returned `nextCursor` is stored and used regardless of admissions; rejection, deferral, or an unusable Ref never stalls the cursor or re-requests the range | `sync_receiver::sec_b11_5_…` (item 4), `sec_13_3_premature_and_invalid_candidates_advance_the_cursor_without_stalling`, `sec_13_3_pagination_uses_each_returned_cursor_exactly` |
+| §13.3 | Cursor persisted only after all accepted entries of the response are durably processed; crash replay is safe and idempotent | `sync_receiver::sec_13_3_duplicate_replay_of_the_same_range_is_idempotent`, `sec_13_5_sqlite_peer_state_survives_restart` |
+| §13.3/§13.2 | Invalid, losing, duplicate, or sticky-excluded synchronized input changes no current state and no update number; valid candidates in the same response still admit | `sync_receiver::sec_13_3_losing_and_invalid_synchronized_input_changes_no_state`, `sec_b11_5_…`, `sec_8_2_sticky_root_revoked_survives_synchronization_and_housekeeping` |
+| §12.6/§13.3 | B.11.7: a three-entry response to `itemLimit = 2` is rejected before any entry, leaving state, counter, and stored peer cursor unchanged | `sync_receiver::sec_b11_7_over_item_limit_response_is_rejected_before_any_entry` (both backends) |
+| §5.4 | Locally premature synchronized/resolved candidates are classified under the receiver's/client's own injected clock; a premature candidate is rejected alone (code 10) and admits once no longer premature | `sync_receiver::sec_13_3_premature_and_invalid_candidates_advance_the_cursor_without_stalling`, `resolution::sec_14_1_continues_past_absent_and_error_results_to_a_further_relay` |
+| §14.1 | One aggregate operation budget (deadline, bytes, requests, visited relays, reference depth) shared across the traversal; no hop or retry resets it; Absent/Error/rejected responses consume it | `relay_client::sec_14_1_budgets_are_charged_and_exhaust_without_reset`, `resolution::sec_14_1_reference_depth_and_visited_budgets_terminate_traversal`, `sec_14_1_exhausted_deadline_terminates_without_a_protocol_result` |
+| §14.1 | Continuation past Absent, per-DID Error, and rejected outer responses while a selected unqueried relay remains within budgets; neither result changes cached identity or sticky state; Error(premature) is never imported | `resolution::sec_14_1_continues_past_absent_and_error_results_to_a_further_relay`, `sec_14_1_absent_and_error_results_change_no_cached_or_sticky_state`, `sec_b11_2_rejected_outer_response_does_not_terminate_or_become_absent` |
+| §14.1 | Cycle detection over (relay id, normalized base URI, DID); every newly contacted URI counts against the distinct-relay budget; URI normalization for accounting only | `resolution::sec_14_1_reference_cycles_are_rejected_and_terminate`, `sec_14_1_base_uri_normalization_for_accounting` |
+| §11.5 | Lazy path compression stores only routing state, only after a locally verified successful traversal; never identity evidence | `resolution::sec_11_5_reference_traversal_verifies_locally_and_compresses_lazily`; demo assertions on the state file |
+| §8.1/§9.2 | Every Full candidate is verified locally through the reviewed production core with the explicit requested DID; selection through `select_current` with retained sticky state; winner independent of relay schedule | `resolution::sec_8_3_winner_is_identical_for_every_relay_schedule_permutation`, `sec_8_2_sticky_root_revoked_survives_resolution_and_excludes_root` |
+| §B.9 | Cross-DID client state is independent | `resolution::sec_b9_cross_did_state_is_independent`; relay-side isolation retained from Milestone 3 |
+| §15.5 | `notFound` (completed operation) is distinct from `temporarilyUnavailable` (budget exhausted or a selected relay unavailable) | `resolution::sec_15_5_not_found_versus_temporarily_unavailable`; `cli_network_shell::multi_relay_resolve_reports_temporarily_unavailable_with_the_full_result` |
+| IMPL §9.5 | Default public policy: HTTPS only, no embedded credentials, no private/loopback/link-local/sensitive destinations (literal and resolved), validated redirect targets, POST redirects refused; explicit loopback development policy | `relay::client::tests::sec_9_5_*` (policy unit tests), `relay_client::sec_9_5_post_redirects_are_refused_and_get_redirects_are_policy_checked`, `sec_9_5_public_policy_refuses_the_request_before_any_transport_call`; resolved-address pinning in `HttpTransport` |
+| IMPL §8/§13 M4 | Non-interactive `relay publish`/`relay resolve`/`relay changes`/`relay sync` and multi-relay `resolve` with one JSON result, stable symbols, exit conventions, protocol-vs-infrastructure distinction, no secret material, no protocol decisions in handlers | `cli_network_shell` suite; demo transcript; handlers in `src/cli/network.rs` delegate to `relay::client`, `relay::sync`, `resolver` |
+| IMPL §13 M4 | Deterministic three-relay demonstration through real serve processes and production binary surfaces | `three_relay_demo::milestone_4_three_relay_demonstration_passes` running `demo/three_relay_demo.sh` |
+
+Known intentional gaps at this milestone: WebFinger and handle discovery
+(§10), inverse-handle verification, migration presentation states
+(§14.2–§14.4), DID Document projection (§9.6–§9.7), and the remote signer
+(§18) are Milestone 5+ scope. `validUntil` staleness is exposed by the
+resolver (`ResolvedRecord::stale`); richer freshness policy remains
+client-application scope.

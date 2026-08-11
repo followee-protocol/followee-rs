@@ -313,3 +313,80 @@ are ordering guarantees of the production locking discipline, not timing
 samples; the unlocked-gap tests prove the complementary boundary, that a
 reader completes while another publication is paused after phase-1
 preparation with no lock held.
+
+## Milestone 4 gate (relay client, synchronization receiver, resolver)
+
+Scoped sweeps over every changed production module — `src/relay/wire.rs`,
+`src/relay/client.rs`, `src/relay/sync.rs`, `src/resolver.rs`,
+`src/store/mod.rs`, `src/store/sqlite.rs`, `src/cli/network.rs`,
+`src/error.rs` — with `cargo mutants --jobs 6`. No mutant timed out; every
+timeout column below is zero and no result is excused as a timeout.
+
+Sweep 1 (initial Milestone 4 code): **538 mutants: 397 caught, 76 missed,
+65 unviable**. Review classified the 76 survivors; genuine gaps were closed
+with killer tests, most notably:
+
+- an exhaustive `wire_error_symbol` table test (23 survivors in the
+  section 15.3 rendering helper);
+- exact protocol-boundary twins for the client-side response parsers:
+  256-result resolve responses, 4096-entry directories, 1024-entry changes
+  responses, 128-byte cursors (request and response side), 2048-byte URIs,
+  non-empty typed `relay-info` arrays, the limits-map label domain, and
+  change-entry arity/type checks (the directory and changes response
+  member-DoS caps were raised so the exact section 15.2 boundaries are
+  reachable rather than masked);
+- network-policy neighbours: acceptance of addresses adjacent to every
+  rejected IPv4 range, rejection of all three IPv4 documentation ranges
+  (a genuine policy-test gap), and production-transport refusal tests for
+  literal and DNS-resolved destinations without touching the network;
+- budget boundaries (byte budget exactly consumed; response exactly at the
+  size bound; request/deadline exhaustion), `SyncOptions::max_pages`
+  fetching exactly its bound, and `SyncError` symbol stability;
+- resolver cache-replacement rules: an earlier same-authority winner never
+  displaces the cached later record, the RootRevoked transition replaces
+  the cache even at a lower timestamp, depth-exactly-at-budget traversal,
+  default-port normalization, and no routing hint for a depth-zero win;
+- CLI in-process tests over a real loopback server: a near-cap (14 KiB)
+  record through the `relay resolve` budget, a multi-hundred-kilobyte
+  `relay sync` page, exact wire-code JSON rendering, the state-file
+  read-error guard (isolated with an invalid-UTF-8 state file so a later
+  state save cannot mask it), and `--deadline-ms` reaching the shared
+  budget.
+
+Sweep 2 (after those tests): **555 mutants: 477 caught, 13 missed,
+65 unviable**. Of the 13, four more were genuine and got killer tests plus
+one clarity refactor (the change-entry head/arity guard was split so each
+check is independently killable; a non-array-entry test and the two new
+transport/cursor/route tests were verified by manually applying each
+mutation and watching the new test fail). A confirmation sweep over the
+four files touched after sweep 2 is recorded below.
+
+### Accepted surviving mutants (Milestone 4)
+
+| Mutant | Explanation |
+| --- | --- |
+| `src/relay/client.rs` `Debug for RelayClient::fmt -> Ok(Default::default())` | Diagnostic formatting only (`finish_non_exhaustive` output); no protocol value flows through `Debug`. |
+| `src/relay/wire.rs` `parse_changes_response` entry guard `\|\|` → `&&` (sweep 2) | Resolved by refactor: the combined head/arity condition was split into two independent checks, each killed by the non-array-entry and arity-2/-4 tests in the confirmation sweep. |
+| `src/cli/network.rs` `64 * 1024` → `+`/`/` in `relay_changes`/`relay_sync` command budgets, and `1024 * 1024` → `+` in `relay_publish`, `2 * 1024 * 1024` first `*` → `+` in `relay_resolve` | Generous local head-room constants in one-shot operator command budgets. Every response these commands can accept is independently bounded first (the client enforces the per-request `byteLimit`, the 1 MiB resolve-response bound, and the 64 KiB small-response bound before the command budget can bind), so the mutated head-room remains above every reachable size; the second `relay_resolve` `*` (whose mutation *does* drop below the 16 KiB record path) is killed by the in-process 14 KiB test. Distinguishing the remainder would require multi-megabyte transfers that the protocol bounds themselves already reject. |
+| `src/store/sqlite.rs` `entry_from_row` delete arm `(None, None, None)` | Unreachable defensive tolerance: every production write path (`commit_current`, `convert_to_ref`) persists complete ordering metadata, so a row with all three ordering columns NULL cannot be created through the store contract. The arm exists so such a row (hand-edited or from a future schema) reads as `ordering: None` instead of failing; deleting it routes to the adjacent `Corrupt` arm, which is also a rejection. The parity suite pins the reachable `Some`/`Corrupt` classifications. |
+
+Any Milestone 4 mutant not listed above and not caught in the confirmation
+sweep is a review finding, not an accepted survivor.
+
+### Confirmation sweep
+
+Confirmation sweep over the four files changed after sweep 2
+(`src/relay/wire.rs`, `src/relay/client.rs`, `src/resolver.rs`,
+`src/cli/network.rs`): **423 mutants: 375 caught, 7 missed, 41 unviable,
+0 timeouts**. The seven survivors are exactly the accepted set above: the
+six command-budget head-room constants and the `Debug` formatting impl.
+The state-read guard, request-cursor boundary, resolved-address rule,
+routing-hint depth condition, and the split change-entry guards were all
+killed. `src/relay/sync.rs`, `src/store/mod.rs`, `src/store/sqlite.rs`,
+and `src/error.rs` were unchanged after sweep 2, whose results for them
+stand (zero missed apart from the documented `entry_from_row` arm).
+
+Combined Milestone 4 evidence: **every mutant in changed production
+modules is caught except the seven accepted survivors and the one
+documented unreachable-defensive store arm**; no timeout was recorded in
+any sweep.

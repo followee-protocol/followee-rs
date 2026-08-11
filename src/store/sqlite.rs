@@ -8,12 +8,12 @@
 //! and counter exactly.
 
 use super::{
-    ChangeRow, DirectoryEntry, EntryPayload, OrderingMeta, RelayIdentity, RelayStore, StoreError,
-    StoredEntry,
+    ChangeRow, DirectoryEntry, EntryPayload, OrderingMeta, PeerState, RelayIdentity, RelayStore,
+    StoreError, StoredEntry,
 };
 use crate::ordering::AuthorityState;
 use crate::record::Authority;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::path::Path;
 
 /// SQLite-backed relay store.
@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS directory (
   endpoint     TEXT NOT NULL,
   capabilities INTEGER NOT NULL
 ) STRICT;
+CREATE TABLE IF NOT EXISTS peers (
+  relay_id BLOB PRIMARY KEY,
+  endpoint TEXT NOT NULL,
+  cursor   BLOB
+) STRICT;
 ";
 
 impl SqliteStore {
@@ -101,6 +106,12 @@ impl SqliteStore {
         conn.pragma_update(None, "synchronous", "FULL")
             .map_err(backend)?;
         conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(backend)?;
+        // The `followee relay sync` operator command opens the same database
+        // as a running `relay serve` process. Writers from both processes
+        // serialize through SQLite's write lock; a bounded busy timeout turns
+        // momentary contention into a short wait instead of an error.
+        conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(backend)?;
         conn.execute_batch(SCHEMA).map_err(backend)?;
         let store = SqliteStore { conn };
@@ -272,7 +283,16 @@ impl RelayStore for SqliteStore {
         authority_state: AuthorityState,
         ordering: OrderingMeta,
     ) -> Result<u64, StoreError> {
-        let tx = self.conn.transaction().map_err(backend)?;
+        // Immediate mode takes the write lock at BEGIN, so update-number
+        // allocation and commit form one allocation-through-commit critical
+        // section across processes as well as threads (specification v0.9
+        // sections 12.6 and 13.2): no other writer can allocate between this
+        // transaction's read of the counter and its commit, and numbers are
+        // therefore assigned in commit order.
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(backend)?;
         let raw: Vec<u8> = tx
             .query_row(
                 "SELECT value FROM meta WHERE key = 'next_update_number'",
@@ -440,7 +460,10 @@ impl RelayStore for SqliteStore {
         entries: Vec<DirectoryEntry>,
         new_generation: [u8; 16],
     ) -> Result<(), StoreError> {
-        let tx = self.conn.transaction().map_err(backend)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(backend)?;
         tx.execute("DELETE FROM directory", []).map_err(backend)?;
         for entry in entries {
             tx.execute(
@@ -466,5 +489,60 @@ impl RelayStore for SqliteStore {
 
     fn reset_cursor_generation(&mut self, new_generation: [u8; 16]) -> Result<(), StoreError> {
         self.put_meta("cursor_generation", &new_generation)
+    }
+
+    fn peer_state(&self, relay_id: &[u8; 16]) -> Result<Option<PeerState>, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT endpoint, cursor FROM peers WHERE relay_id = ?1",
+                [relay_id.as_slice()],
+                |row| {
+                    Ok(PeerState {
+                        relay_id: *relay_id,
+                        endpoint: row.get::<_, String>(0)?,
+                        cursor: row.get::<_, Option<Vec<u8>>>(1)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(backend)
+    }
+
+    fn set_peer_state(&mut self, state: &PeerState) -> Result<(), StoreError> {
+        self.conn
+            .execute(
+                "INSERT INTO peers (relay_id, endpoint, cursor) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(relay_id) DO UPDATE SET
+                   endpoint = excluded.endpoint, cursor = excluded.cursor",
+                params![state.relay_id.as_slice(), state.endpoint, state.cursor],
+            )
+            .map_err(backend)?;
+        Ok(())
+    }
+
+    fn peer_states(&self) -> Result<Vec<PeerState>, StoreError> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT relay_id, endpoint, cursor FROM peers ORDER BY relay_id")
+            .map_err(backend)?;
+        let mapped = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<Vec<u8>>>(2)?,
+                ))
+            })
+            .map_err(backend)?;
+        let mut states = Vec::new();
+        for item in mapped {
+            let (relay_id, endpoint, cursor) = item.map_err(backend)?;
+            states.push(PeerState {
+                relay_id: blob16(relay_id, "peer relay id")?,
+                endpoint,
+                cursor,
+            });
+        }
+        Ok(states)
     }
 }

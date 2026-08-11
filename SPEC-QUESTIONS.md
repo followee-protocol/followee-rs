@@ -462,3 +462,56 @@ semantics, which are unambiguous.
    for publish the record itself is the protocol item, and the record
    classification codes are only expressible through the publish response.
    (`relay_http::sec_15_4_oversized_entities_…`, `relay_core` admission suite)
+
+## SQ-17 — `publish-response` `errorCode`: is it bound to status `2`?
+
+**Status:** resolved as a non-blocking derived reading (spec v0.9, commit `13777db`) · **Affected:** Milestone 4 client · **Spec:** section 12.5; Appendix A `publish-response`
+
+Section 12.5 shows `? 2: errorCode` and describes the three statuses, but —
+unlike section 12.6 for `changes-response` — states no status-dependent
+required/forbidden rule for label `2`. The v1 relay in this repository emits
+the code only with status `2`, and rejection semantics do not depend on the
+answer, so this does not affect conformance. Derived reading: the production
+client accepts label `2` with any status per the Appendix A CDDL and surfaces
+it verbatim without inferring anything from it. If a future amendment binds
+the field to status `2`, only the client-side schema check tightens.
+
+**Test obligation (Milestone 4):** `relay::wire` publish-response parser
+tests; `cli_shell`/demo assertions consume the emitted-with-status-2 form.
+
+## SQ-18 — `changes` success entries: is the receiver required to validate ordering?
+
+**Status:** resolved as a non-blocking derived reading (spec v0.9, commit `13777db`) · **Affected:** Milestone 4 receiver · **Spec:** sections 12.6, 13.2
+
+Section 12.6 requires entries "ordered by increasing `lastUpdated`" and
+section 13.2 makes relay-local update numbers unique per relay, so a
+conforming response is strictly increasing. The specification obliges the
+sender but does not state whether a receiver must reject a misordered
+response. Derived reading: the strict client rejects the complete success
+response when entries are not strictly increasing, because a misordered
+response is non-conforming output whose cursor semantics are unreliable.
+This can only reject non-conforming peers and cannot affect interoperation
+with conforming relays.
+
+**Test obligation (Milestone 4):**
+`relay_client::sec_12_6_misordered_last_updated_rejects_the_complete_response`.
+
+## SQ-19 — Peer-cursor keying across endpoint and relay-instance changes
+
+**Status:** resolved as a non-blocking derived reading (spec v0.9, commit `13777db`) · **Affected:** Milestone 4 receiver · **Spec:** sections 12.2, 12.6, 12.7, 13.3
+
+A cursor is opaque state issued by one relay instance; section 12.2 defines
+the stable 16-byte relay instance identifier "for cycle detection and cache
+scoping", and section 12.7 binds cursor meaning to the issuing relay's
+cursor generation. The specification does not spell out how a receiver keys
+its persisted peer cursors. Derived reading: peer synchronization state is
+keyed by the peer's relay instance identifier (read from `v1/info`), so an
+endpoint change under the same identifier keeps the cursor, while a
+different identifier at a reused endpoint starts as a new peer with a null
+cursor. Any mismatch a stale cursor could still produce is already handled
+by the normative `ResetRequired`/`invalidCursor` paths, so no wire behaviour
+depends on this choice.
+
+**Test obligation (Milestone 4):**
+`sync_receiver::sec_12_7_peer_identity_is_the_relay_id_not_the_endpoint`,
+`sync_receiver::sec_12_7_endpoint_change_keeps_the_same_peer_cursor`.

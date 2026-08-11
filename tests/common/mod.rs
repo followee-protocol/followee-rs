@@ -695,3 +695,239 @@ pub fn publish_outcome(response: &[u8]) -> (u64, Option<u64>) {
 pub fn seal(payload: &[u8], seed: &[u8; 32]) -> Vec<u8> {
     seal_with_protected(&protected_ed25519(), payload, seed)
 }
+
+// ---------------------------------------------------------------------------
+// Milestone 4: deterministic mock transport and client-side builders.
+// ---------------------------------------------------------------------------
+
+use followee::relay::client::{
+    Method, Transport, TransportError, TransportRequest, TransportResponse,
+};
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+/// One request recorded by [`MockTransport`].
+#[derive(Debug, Clone)]
+pub struct RecordedRequest {
+    pub method: Method,
+    pub url: String,
+    pub content_type: Option<&'static str>,
+    pub body: Vec<u8>,
+}
+
+/// Deterministic injected transport: responses are queued per exact URL and
+/// consumed in order; every request is recorded. No network, no sleeping.
+#[derive(Default)]
+pub struct MockTransport {
+    routes: RefCell<HashMap<String, std::collections::VecDeque<TransportResponse>>>,
+    errors: RefCell<HashMap<String, TransportError>>,
+    pub log: RefCell<Vec<RecordedRequest>>,
+}
+
+impl MockTransport {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Queues a response for the exact URL.
+    pub fn on(&self, url: &str, response: TransportResponse) {
+        self.routes
+            .borrow_mut()
+            .entry(url.to_owned())
+            .or_default()
+            .push_back(response);
+    }
+
+    /// Makes the exact URL fail with a transport error.
+    pub fn fail(&self, url: &str, error: TransportError) {
+        self.errors.borrow_mut().insert(url.to_owned(), error);
+    }
+
+    pub fn requests(&self) -> Vec<RecordedRequest> {
+        self.log.borrow().clone()
+    }
+}
+
+impl Transport for MockTransport {
+    fn execute(&self, request: &TransportRequest<'_>) -> Result<TransportResponse, TransportError> {
+        self.log.borrow_mut().push(RecordedRequest {
+            method: request.method,
+            url: request.url.to_owned(),
+            content_type: request.content_type,
+            body: request.body.to_vec(),
+        });
+        if let Some(error) = self.errors.borrow().get(request.url) {
+            return Err(error.clone());
+        }
+        self.routes
+            .borrow_mut()
+            .get_mut(request.url)
+            .and_then(std::collections::VecDeque::pop_front)
+            .ok_or_else(|| TransportError::Io(format!("no mock response for {}", request.url)))
+    }
+}
+
+/// A 200 `application/cbor` transport response.
+pub fn cbor_ok(body: Vec<u8>) -> TransportResponse {
+    TransportResponse {
+        status: 200,
+        content_type: Some("application/cbor".to_owned()),
+        location: None,
+        body,
+    }
+}
+
+/// Builds a conforming `v1/info` response body for a mock peer.
+pub fn info_response(relay_id: &[u8; 16], cursor_gen: &[u8; 16], dir_gen: &[u8; 16]) -> Vec<u8> {
+    let limits = r_map(&[
+        (r_uint(0), r_uint(16 * 1024)),
+        (r_uint(1), r_uint(256)),
+        (r_uint(2), r_uint(1024 * 1024)),
+        (r_uint(3), r_uint(1024)),
+        (r_uint(4), r_uint(4 * 1024 * 1024)),
+    ]);
+    r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), r_bstr(relay_id)),
+        (r_uint(2), r_uint(0x01 | 0x02 | 0x04)),
+        (r_uint(3), r_array(&[r_uint(1)])),
+        (r_uint(4), r_array(&[r_nint_mag(18)])),
+        (r_uint(5), limits),
+        (r_uint(6), r_bstr(cursor_gen)),
+        (r_uint(7), r_bstr(dir_gen)),
+        (r_uint(8), r_tstr("http://127.0.0.1/")),
+    ])
+}
+
+/// Builds a `v1/resolve` response wrapper from encoded results under the
+/// given directory generation.
+pub fn resolve_response_with(generation: &[u8; 16], results: &[Vec<u8>]) -> Vec<u8> {
+    r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), r_bstr(generation)),
+        (r_uint(2), r_array(results)),
+    ])
+}
+
+pub fn rr_full(envelope: &[u8]) -> Vec<u8> {
+    r_map(&[(r_uint(0), r_uint(0)), (r_uint(1), r_bstr(envelope))])
+}
+
+pub fn rr_ref(index: u32) -> Vec<u8> {
+    r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), r_uint(u64::from(index))),
+    ])
+}
+
+pub fn rr_absent() -> Vec<u8> {
+    r_map(&[(r_uint(0), r_uint(2))])
+}
+
+pub fn rr_error(code: u64) -> Vec<u8> {
+    r_map(&[(r_uint(0), r_uint(3)), (r_uint(2), r_uint(code))])
+}
+
+/// Builds a `v1/directory` response body.
+pub fn directory_response_with(
+    generation: &[u8; 16],
+    entries: &[(u32, [u8; 16], &str)],
+) -> Vec<u8> {
+    let rows: Vec<Vec<u8>> = entries
+        .iter()
+        .map(|(index, relay_id, endpoint)| {
+            r_map(&[
+                (r_uint(0), r_uint(u64::from(*index))),
+                (r_uint(1), r_bstr(relay_id)),
+                (r_uint(2), r_tstr(endpoint)),
+                (r_uint(3), r_uint(0x01 | 0x02)),
+            ])
+        })
+        .collect();
+    r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), r_bstr(generation)),
+        (r_uint(2), r_array(&rows)),
+    ])
+}
+
+/// Builds one `v1/changes` change entry.
+pub fn ch_entry(did: &str, payload: Vec<u8>, last_updated: u64) -> Vec<u8> {
+    r_array(&[r_tstr(did), payload, r_uint(last_updated)])
+}
+
+/// Builds a `v1/changes` success response body.
+pub fn changes_success_with(
+    generation: &[u8; 16],
+    entries: &[Vec<u8>],
+    next_cursor: &[u8],
+    has_more: bool,
+) -> Vec<u8> {
+    r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), r_uint(0)),
+        (r_uint(2), r_array(entries)),
+        (r_uint(3), r_bstr(next_cursor)),
+        (r_uint(4), vec![if has_more { 0xf5 } else { 0xf4 }]),
+        (r_uint(5), r_bstr(generation)),
+    ])
+}
+
+/// The exact two-field ResetRequired response body.
+pub fn changes_reset_body() -> Vec<u8> {
+    r_map(&[(r_uint(0), r_uint(1)), (r_uint(1), r_uint(1))])
+}
+
+/// A `v1/changes` status-2 error response body.
+pub fn changes_error_body(code: u64) -> Vec<u8> {
+    r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), r_uint(2)),
+        (r_uint(6), r_uint(code)),
+    ])
+}
+
+/// Signs a fresh synthetic Root record with an explicit timestamp and
+/// display name, returning `(did, envelope, root_seed)`. Distinct from
+/// every published Appendix B seed.
+pub fn synthetic_record_at(
+    index: u64,
+    timestamp_ms: u64,
+    display_name: &str,
+) -> (String, Vec<u8>, [u8; 32]) {
+    use followee::record::{
+        Authority, AuthorityDescriptor, RecordBody, revocation_commitment, sign_record,
+    };
+    let mut root = [0u8; 32];
+    root[..8].copy_from_slice(&index.to_be_bytes());
+    root[31] = 0x61;
+    let mut revocation = [0u8; 32];
+    revocation[..8].copy_from_slice(&index.to_be_bytes());
+    revocation[31] = 0x62;
+    let descriptor = AuthorityDescriptor {
+        root_key: followee::crypto::ed25519_public_key(&root),
+        revocation_commitment: revocation_commitment(&followee::crypto::ed25519_public_key(
+            &revocation,
+        )),
+    };
+    let did = descriptor.did();
+    let contact = followee::contact::ContactDocument {
+        display_name: Some(display_name.to_owned()),
+        ..Default::default()
+    };
+    let body = RecordBody {
+        id: did.clone(),
+        timestamp_ms,
+        authority: Authority::Root,
+        descriptor,
+        revocation_key: None,
+        valid_until_ms: None,
+        contact,
+        extensions: Default::default(),
+    };
+    (
+        did.as_str().to_owned(),
+        sign_record(&body, &root).expect("signs"),
+        root,
+    )
+}
