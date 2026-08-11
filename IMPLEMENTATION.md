@@ -34,7 +34,7 @@ The v0.8 amendment preserves the earlier Alice positive vectors but changes norm
 
 The v0.8.1 amendment is deliberately narrow. It clarifies that a well-formed, basically valid, deterministically encoded CBOR simple value not admitted by a v1 schema is a schema fault, not a deterministic-profile fault, and adds the two signed Appendix B.12 vectors. A previous green result against v0.8 remains useful evidence but is not a v0.8.1 result. Rust and Python must again be maintained independently from the pinned text before the neutral harness is re-pinned. The complete v0.8.1 suite must be rerun; no prior result, fixture promotion or disagreement count is inherited automatically.
 
-The v0.9 amendment is relay-only. It closes the concurrent-ingress cursor-overtaking hazard by requiring update-number assignment, state commitment and changes-feed visibility to form one observable order. Sections 3 through 8, every record and envelope byte, and Appendix B.2 through B.12 are unchanged. The reviewed v0.8.1 Rust core, clean-room model, 218-of-218 differential result and 53 confirmed fixtures therefore remain applicable evidence for that unchanged core; they are not rewritten or relabelled as newly derived v0.9 evidence. The bounded Rust relay maintenance pass is reviewed at `497d57c1b1fce53b1e4c89747ef454d6b3f9a7b5` (`milestone-3-v0.9-reviewed`): it audits the invariant against both production backends, moves expensive state-independent verification outside the relay write-critical section, and adds deterministic concurrency and controlled-fault evidence while preserving all prior Milestone 2 and 3 behaviour. A new clean-room core-model maintenance pass is not required solely for this amendment because the model's Sections 3-through-8 scope did not change. Future relay-level conformance work must pin v0.9.
+The v0.9 amendment is relay-only. It closes the concurrent-ingress cursor-overtaking hazard by requiring update-number assignment, state commitment and changes-feed visibility to form one observable order. Sections 3 through 8, every record and envelope byte, and Appendix B.2 through B.12 are unchanged. The reviewed v0.8.1 Rust core, clean-room model, 218-of-218 differential result and 53 confirmed fixtures therefore remain applicable evidence for that unchanged core; they are not rewritten or relabelled as newly derived v0.9 evidence. The bounded Rust relay maintenance pass is reviewed at `497d57c1b1fce53b1e4c89747ef454d6b3f9a7b5` (`milestone-3-v0.9-reviewed`): it audits the invariant against both production backends, moves expensive state-independent verification outside the relay write-critical section, and adds deterministic concurrency and controlled-fault evidence while preserving all prior Milestone 2 and 3 behaviour. The resolver and relay-network milestone is reviewed at `c74d59d20945e103e9b208413156922cd5be8a49` (`milestone-4-v0.9-reviewed`): it adds the bounded production HTTP/CBOR client, peer synchronization receiver with durable cursors, shared-budget multi-relay resolution, direct network CLI surfaces and the deterministic three-relay demonstration. A new clean-room core-model maintenance pass is not required solely for this amendment because the model's Sections 3-through-8 scope did not change. Future relay-level conformance work must pin v0.9.
 
 ## 3. Implementation status and naming
 
@@ -46,7 +46,7 @@ It is the first implementation but is not a privileged “reference truth.” Pu
 
 The later `followee-icp` implementation is expected to be independently written in Motoko and to consume the same external conformance fixtures without sharing protocol implementation code.
 
-Reviewed Rust milestones 0 through 3 are complete and maintained to v0.9 through tag `milestone-3-v0.9-reviewed` at `497d57c1b1fce53b1e4c89747ef454d6b3f9a7b5`. The next work item is Milestone 4: the resolver and relay network.
+Reviewed Rust milestones 0 through 4 are complete and maintained to v0.9 through tag `milestone-4-v0.9-reviewed` at `c74d59d20945e103e9b208413156922cd5be8a49`. The next work item is Milestone 5: handles and the public demonstration.
 
 ## 4. Scope
 
@@ -303,6 +303,7 @@ followee relay changes
 followee resolve
 followee handle resolve
 followee handle verify
+followee handle serve
 ```
 
 Exact flag names may evolve, but commands MUST support non-interactive use and machine-readable output for tests.
@@ -310,6 +311,8 @@ Exact flag names may evolve, but commands MUST support non-interactive use and m
 `record inspect` must clearly distinguish raw parsed claims from locally verified facts. It must not display a Contact Document as verified when verification was skipped or failed.
 
 `record select` requires an explicit target DID, accepts candidates in arbitrary order, and returns the same winner and metadata for every permutation. Adding or reordering valid records for unrelated DIDs MUST NOT change the target, winner, or sticky authority state.
+
+Milestone 5 owns the three handle commands. `handle resolve` performs production WebFinger discovery and reports the exact-subject and link-cardinality result. `handle verify` combines a locally verified Followee record with inverse WebFinger discovery and reports the handle claim as verified only when both directions bind to the same DID. `handle serve` is the minimal demonstration-authority process: it serves the JRD documents used by local black-box tests and may run behind provider HTTPS termination for the public demonstration. These commands must call the production WebFinger, verification and authority components rather than reproducing their decisions in CLI code.
 
 The CLI should return nonzero exit status on failure and provide stable symbolic error names. Raw secret material must never be emitted by a general `--verbose` or diagnostic mode.
 
@@ -912,19 +915,25 @@ Acceptance:
 
 Deliver:
 
-- WebFinger lookup;
-- inverse handle verification;
-- optional current-record bootstrap;
-- migration presentation states; and
-- a minimal HTTPS handle authority deployed on a provider-assigned domain.
+- production WebFinger lookup under the network policy and shared bounds established for Milestone 4;
+- inverse handle verification against a locally verified Followee record;
+- optional current-record bootstrap whose supplied record is always verified locally before use;
+- all three migration presentation states without automatic re-following;
+- minimal non-interactive `followee handle resolve` and `followee handle verify` commands with machine-readable output;
+- a minimal `followee handle serve` demonstration-authority command for local black-box testing; and
+- the same minimal authority deployed behind HTTPS on a provider-assigned domain.
 
 Acceptance:
 
-- exact-subject and exactly-one-link requirements are tested;
+- exact requested canonical `acct:` subject and exactly-one-Followee-link requirements are tested through the production WebFinger client;
 - ASCII-case variants cannot be assigned to different DIDs by the demonstration authority;
-- a signed `alsoKnownAs` claim is not called verified without inverse mapping;
+- a signed `alsoKnownAs` claim is not called verified without both successful local record verification and inverse mapping of the exact handle to the same DID;
 - disappearance or reassignment of a handle does not change the followed DID;
-- invalid bootstrap records are discarded locally; and
+- invalid, mismatched, stale or losing bootstrap records are discarded locally without changing the followed DID or sticky authority state;
+- all three migration-check states are presented distinctly, and none changes the followed DID without an explicit user action;
+- the handle commands exercise the production WebFinger, verification and authority paths rather than implementing parallel CLI policy;
+- local black-box tests start the demonstration authority, exercise discovery and inverse verification over HTTP, and pin malformed, ambiguous, reassigned and ASCII-case-variant behaviour;
+- the public authority serves the same tested JRD semantics through HTTPS on a provider-assigned domain; and
 - the demonstration works without an ICP dependency or purchased domain.
 
 ### Milestone 6: external interoperability
