@@ -18,9 +18,14 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned commit: `13777db64e1eca63796a8f485cf721307d2c3869`
-- specification SHA-256: `4d7575d81f15925617185667ebb99b0b098822e738e0840ec5b64d80f35cf96f`
-- specification draft: `v0.9`
+- pinned repository commit: `fd8f6a8b2311677be38bd22a0a3265539dca2158`
+- specification revision commit: `5bea128f2800cc3fd443fa7440f8c247b9d4a9c8`
+- specification SHA-256: `1c1a20c639aaf90b1bfc54b5e9ea72c49f680566ba9b12ad10615412ece3cd71`
+- specification draft: `v0.9.1`
+- whitepaper: `Followee-Whitepaper.md`
+- whitepaper revision commit: `fd8f6a8b2311677be38bd22a0a3265539dca2158`
+- whitepaper SHA-256: `1d880f36a26fa1411f454443dabd7f31f8b4bbfc30f850eb74a6d3aa304e8dc3`
+- whitepaper draft: `v0.10`
 - protocol version: `1`
 - DID method: `did:flw`
 
@@ -34,7 +39,9 @@ The v0.8 amendment preserves the earlier Alice positive vectors but changes norm
 
 The v0.8.1 amendment is deliberately narrow. It clarifies that a well-formed, basically valid, deterministically encoded CBOR simple value not admitted by a v1 schema is a schema fault, not a deterministic-profile fault, and adds the two signed Appendix B.12 vectors. A previous green result against v0.8 remains useful evidence but is not a v0.8.1 result. Rust and Python must again be maintained independently from the pinned text before the neutral harness is re-pinned. The complete v0.8.1 suite must be rerun; no prior result, fixture promotion or disagreement count is inherited automatically.
 
-The v0.9 amendment is relay-only. It closes the concurrent-ingress cursor-overtaking hazard by requiring update-number assignment, state commitment and changes-feed visibility to form one observable order. Sections 3 through 8, every record and envelope byte, and Appendix B.2 through B.12 are unchanged. The reviewed v0.8.1 Rust core, clean-room model, 218-of-218 differential result and 53 confirmed fixtures therefore remain applicable evidence for that unchanged core; they are not rewritten or relabelled as newly derived v0.9 evidence. The bounded Rust relay maintenance pass is reviewed at `497d57c1b1fce53b1e4c89747ef454d6b3f9a7b5` (`milestone-3-v0.9-reviewed`): it audits the invariant against both production backends, moves expensive state-independent verification outside the relay write-critical section, and adds deterministic concurrency and controlled-fault evidence while preserving all prior Milestone 2 and 3 behaviour. The resolver and relay-network milestone is reviewed at `c74d59d20945e103e9b208413156922cd5be8a49` (`milestone-4-v0.9-reviewed`): it adds the bounded production HTTP/CBOR client, peer synchronization receiver with durable cursors, shared-budget multi-relay resolution, direct network CLI surfaces and the deterministic three-relay demonstration. A new clean-room core-model maintenance pass is not required solely for this amendment because the model's Sections 3-through-8 scope did not change. Future relay-level conformance work must pin v0.9.
+The v0.9 amendment is relay-only. It closes the concurrent-ingress cursor-overtaking hazard by requiring update-number assignment, state commitment and changes-feed visibility to form one observable order. Sections 3 through 8, every record and envelope byte, and Appendix B.2 through B.12 are unchanged. The reviewed v0.8.1 Rust core, clean-room model, 218-of-218 differential result and 53 confirmed fixtures therefore remain applicable evidence for that unchanged core; they are not rewritten or relabelled as newly derived v0.9 evidence. The bounded Rust relay maintenance pass is reviewed at `497d57c1b1fce53b1e4c89747ef454d6b3f9a7b5` (`milestone-3-v0.9-reviewed`): it audits the invariant against both production backends, moves expensive state-independent verification outside the relay write-critical section, and adds deterministic concurrency and controlled-fault evidence while preserving all prior Milestone 2 and 3 behaviour. The resolver and relay-network milestone is reviewed at `c74d59d20945e103e9b208413156922cd5be8a49` (`milestone-4-v0.9-reviewed`): it adds the bounded production HTTP/CBOR client, peer synchronization receiver with durable cursors, shared-budget multi-relay resolution, direct network CLI surfaces and the deterministic three-relay demonstration. A new clean-room core-model maintenance pass was not required solely for that amendment because the model's Sections 3-through-8 scope did not change. The reviewed relay work remains evidence at its v0.9 pin; subsequent work pins the current specification revision stated above.
+
+The v0.9.1 amendment resolves the Milestone 5 migration-state ambiguity recorded as SQ-20 without changing wire bytes, cryptography, record verification, ordering, relay ingress, cursor semantics or the Appendix B vectors. A reciprocal check that obtains both winning admissible records but finds either one stale is complete and therefore **Checked but unverified**; diagnostics may distinguish `claimantStale` from `counterpartStale`. **Not checked** is reserved for checks that did not complete because they were deferred, exhausted their shared budget, timed out, encountered unavailability or found no admissible counterpart. Neither state permits migration-oriented presentation or changes durable identity state. The existing core and v0.9 relay evidence remains applicable, but Milestone 5 must implement this classification through the production resolver and rerun its complete local gate against v0.9.1.
 
 ## 3. Implementation status and naming
 
@@ -46,7 +53,7 @@ It is the first implementation but is not a privileged “reference truth.” Pu
 
 The later `followee-icp` implementation is expected to be independently written in Motoko and to consume the same external conformance fixtures without sharing protocol implementation code.
 
-Reviewed Rust milestones 0 through 4 are complete and maintained to v0.9 through tag `milestone-4-v0.9-reviewed` at `c74d59d20945e103e9b208413156922cd5be8a49`. The next work item is Milestone 5: handles and the public demonstration.
+Reviewed Rust milestones 0 through 4 are complete through tag `milestone-4-v0.9-reviewed` at `c74d59d20945e103e9b208413156922cd5be8a49`. Milestone 5 must complete against specification v0.9.1, including the clarified stale-migration classification and the reproducible public demonstration described below.
 
 ## 4. Scope
 
@@ -283,7 +290,7 @@ The creation command should permit the revocation key to be written directly to 
 
 The CLI may accept a friendly JSON Contact Document using field names rather than CBOR labels. This JSON is an implementation convenience and is not a Followee wire format.
 
-It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars introduced in specification v0.6 Section 7.3 and retained by v0.9; authoring and verification paths must apply the same grammar. Every URI-valued field MUST use the pinned v0.9 Section 7.2 `URI` production, including optional query and fragment components, rather than the fragment-excluding RFC 3986 `absolute-URI` production.
+It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars introduced in specification v0.6 Section 7.3 and retained by v0.9.1; authoring and verification paths must apply the same grammar. Every URI-valued field MUST use the pinned v0.9.1 Section 7.2 `URI` production, including optional query and fragment components, rather than the fragment-excluding RFC 3986 `absolute-URI` production.
 
 ## 8. CLI surface
 
@@ -414,9 +421,13 @@ The resolver must:
 - expose freshness and staleness; and
 - implement all three migration-check states without automatic re-following.
 
+Migration classification follows specification v0.9.1 exactly. **Verified** requires both winning admissible records, both fresh, and reciprocal. A completed check with either winning record stale or with failed reciprocity is **Checked but unverified**. **Not checked** means the reciprocal check did not complete. Tests must exercise stale claimant and stale counterpart cases separately, preserve the reason for diagnostics, suppress migration presentation in both cases, and prove that neither classification mutates the followed DID, cached identity record or sticky authority state.
+
 WebFinger support must verify the exact requested canonical `acct:` subject and require exactly one Followee DID relation. Handle claims in `alsoKnownAs` remain unverified until inverse lookup maps the exact handle back to the same DID. The demonstration handle authority must not assign ASCII-case variants under one domain to different DIDs; accepted variants are rejected or mapped as aliases to the same DID while exact-subject verification remains unchanged.
 
-The public WebFinger demonstration is deferred until the local resolver and relay tests pass. It may then use a tiny independently deployed HTTPS function with a provider-assigned domain; no purchased custom domain is required for the proof of concept.
+The public WebFinger demonstration is deferred until the local resolver and relay tests pass. Its canonical reproducible deployment target is a container on Railway using the provider-assigned HTTPS domain, the platform-supplied `PORT`, and an explicitly configured public base URI. The image and start command must contain no private key or deployment credential; the demonstration authority publishes only reviewed public configuration and signed public record bytes. A purchased custom domain is not required.
+
+Retain a provider-neutral VPS deployment beside the Railway path: the tested authority binary behind Caddy or nginx for HTTPS termination, with a hardened systemd unit and exact operator probes. This alternative is useful for an operator who already controls a server, but it is not required for the vanilla reproducible acceptance path. The Milestone 5 authority is immutable and needs no database. For later relay deployment tests, the Railway documentation may additionally describe mounting a persistent volume at `/data` and placing the SQLite database there; that optional profile must not be conflated with the stateless handle authority.
 
 ## 11. Test strategy
 
@@ -503,7 +514,7 @@ Appendix B does not by itself cover every security-bearing branch in Sections 5 
 - absence of any “last good Root” fallback; and
 - Section 8.5 behaviour after sticky state is deliberately discarded, distinguished from behaviour while it is retained.
 
-Specification v0.9 Section 20.1 retains the URI-profile cases introduced in v0.7, which:
+Specification v0.9.1 Section 20.1 retains the URI-profile cases introduced in v0.7, which:
 
 - accept scheme-bearing URIs with optional queries and fragments, including `https://example.com/profile?view=full#about` and `did:web:example.com#key-1`;
 - reject network-path, absolute-path, relative-path, query-only and fragment-only references;
@@ -569,7 +580,7 @@ The reviewed correction rejects Boolean CBOR keys masquerading as integer labels
 
 The v0.7 maintenance freeze independently applied the RFC 3986 `URI` production and exact CBOR label typing from the v0.7 specification, preserved the unchanged Appendix B positive bytes, and passed its complete 173-test suite before differential material was exposed. The reviewed v0.8 maintenance freeze independently derived the v0.7-to-v0.8 delta, reproduced Appendix B.9 and B.10, passed its complete 193-test suite, and includes a documentation-only post-maintenance correction whose parent is the implementation commit. Its tag peels to the reviewed correction commit and is the starting implementation revision for the v0.8.1 clean-room maintenance pass.
 
-The reviewed v0.8.1 maintenance freeze independently reproduced Appendix B.12 and preserved the model's independently derived record-level `schemaViolation` classification. The immutable freeze also preserved a narrower structural-validator interpretation that the first differential run exposed. The separate reviewed conformance correction at `a94e9a8a7bd2f9c2e0947715ec387b6c3967e4e6` moved schema admission out of deterministic-CBOR decoding without rewriting that evidence. The corrected run at `beb89f656e1ca8398fd09b0be4799339a4fc1d98` (`v0.8.1-differential-final`) produced 218 agreed comparisons out of 218. The 53 implementation-status fixtures were subsequently promoted at `9493e39bd738372fe1e2fc1b2e96f6a41983c1be` (`v0.8.1-fixtures-confirmed`) without changing their substantive bytes or expected results. These revisions remain the frozen core evidence for v0.9 because v0.9 changes no core-model requirement.
+The reviewed v0.8.1 maintenance freeze independently reproduced Appendix B.12 and preserved the model's independently derived record-level `schemaViolation` classification. The immutable freeze also preserved a narrower structural-validator interpretation that the first differential run exposed. The separate reviewed conformance correction at `a94e9a8a7bd2f9c2e0947715ec387b6c3967e4e6` moved schema admission out of deterministic-CBOR decoding without rewriting that evidence. The corrected run at `beb89f656e1ca8398fd09b0be4799339a4fc1d98` (`v0.8.1-differential-final`) produced 218 agreed comparisons out of 218. The 53 implementation-status fixtures were subsequently promoted at `9493e39bd738372fe1e2fc1b2e96f6a41983c1be` (`v0.8.1-fixtures-confirmed`) without changing their substantive bytes or expected results. These revisions remain the frozen core evidence for v0.9 and v0.9.1 because neither amendment changes a core-model requirement.
 
 Independence requirements:
 
@@ -783,14 +794,14 @@ Acceptance:
 - the B.5 RootRevoked wiring test delegates exactly once with label `5`'s exact revealed revocation public key, COSE `Sig_structure` and received signature;
 - the public B.4 `S + L` test uses the non-injectable production record-verification wrapper;
 - CI rejects direct underlying-library verification calls outside the audited strict wrapper;
-- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained at the pinned v0.9 commit;
+- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained at the pinned v0.9.1 commit;
 - B.8 fails specifically with `identityBindingMismatch` despite a valid attacker signature;
 - B.9 Bob keys, commitment, descriptor, DID, body, `Sig_structure`, digest, signature and envelope reproduce exactly, and Alice/Bob tests prove sticky authority and update state are keyed independently per DID;
 - all five B.10 raw bodies reproduce their stated digests and `Sig_structure` lengths, their signatures verify under Alice's legitimate root key, and every case fails exactly with `invalidCbor` rather than `nonDeterministicCbor`, `schemaViolation` or `invalidSignature`;
 - both B.12 raw bodies reproduce their stated digests and `Sig_structure` lengths, their signatures verify under Alice's legitimate root key, the public deterministic-CBOR validation entry point admits their simple values, and complete record verification fails each exact signed envelope with `schemaViolation` rather than `invalidCbor`, `nonDeterministicCbor` or `invalidSignature`;
 - CBOR tests distinguish not-well-formed/basic-invalid input from basically valid non-deterministic input and from later Followee schema failures, recursively including ignored extension values while stopping at byte-string boundaries;
 - duplicate-map validation compares CBOR data-model key identity rather than bare host-language equality or raw bytes before deterministic validation;
-- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or a URI satisfying specification v0.9 Section 7.2, with no mutable registry lookup or normalization;
+- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or a URI satisfying specification v0.9.1 Section 7.2, with no mutable registry lookup or normalization;
 - every numeric core label is accepted only from the corresponding CBOR unsigned-integer key; Boolean `false` and `true` substitutions in Authority Descriptors and public-key objects fail with `schemaViolation`, including the correctly signed, descriptor-bound Appendix B.7 item 17 construction;
 - URI conformance tests accept scheme-bearing queries and fragments, reject every relative-reference form, and accept both lowercase and uppercase `IPvFuture` introducers through the production Contact Document path;
 - service collection tests derive the effective Root and RootRevoked service maxima from the normative aggregate-member counting rule and current record schemas, assert that the computed results are respectively 61 and 60, and prove admission at each computed `N` with aggregate-limit rejection at `N + 1`; the independent 64-entry cap is tested separately, and 61/60 are expected computed results rather than fixture inputs;
@@ -920,8 +931,9 @@ Deliver:
 - optional current-record bootstrap whose supplied record is always verified locally before use;
 - all three migration presentation states without automatic re-following;
 - minimal non-interactive `followee handle resolve` and `followee handle verify` commands with machine-readable output;
-- a minimal `followee handle serve` demonstration-authority command for local black-box testing; and
-- the same minimal authority deployed behind HTTPS on a provider-assigned domain.
+- a minimal `followee handle serve` demonstration-authority command for local black-box testing;
+- reproducible container packaging for the same authority on Railway, deployed behind its provider-assigned HTTPS domain; and
+- the retained provider-neutral VPS alternative using Caddy or nginx and systemd.
 
 Acceptance:
 
@@ -930,10 +942,12 @@ Acceptance:
 - a signed `alsoKnownAs` claim is not called verified without both successful local record verification and inverse mapping of the exact handle to the same DID;
 - disappearance or reassignment of a handle does not change the followed DID;
 - invalid, mismatched, stale or losing bootstrap records are discarded locally without changing the followed DID or sticky authority state;
-- all three migration-check states are presented distinctly, and none changes the followed DID without an explicit user action;
+- stale claimant and stale counterpart checks each produce **Checked but unverified**, incomplete checks alone produce **Not checked**, and none of the three migration states changes the followed DID without an explicit user action;
 - the handle commands exercise the production WebFinger, verification and authority paths rather than implementing parallel CLI policy;
 - local black-box tests start the demonstration authority, exercise discovery and inverse verification over HTTP, and pin malformed, ambiguous, reassigned and ASCII-case-variant behaviour;
-- the public authority serves the same tested JRD semantics through HTTPS on a provider-assigned domain; and
+- the committed container binds to Railway's supplied `PORT`, derives no security decision from provider headers, shuts down cleanly, and serves the same tested JRD semantics through the provider-assigned HTTPS domain;
+- public probes cover exact subject, exactly one Followee relation, CORS, `404` for an unknown handle, `400` for a malformed request, production `handle resolve`, and production `handle verify`;
+- the VPS/Caddy/nginx/systemd artifacts remain internally consistent with the same authority configuration and public probes; and
 - the demonstration works without an ICP dependency or purchased domain.
 
 ### Milestone 6: external interoperability
@@ -966,7 +980,7 @@ An AI coding agent working from this brief should:
 
 For the first coding session, the agent should perform Milestone 0 only, then present the scaffold and CI for review. It should not begin cryptographic or CBOR implementation in the same unreviewed pass.
 
-An independently authored Python model must be assigned through a separate clean session whose context contains its pinned protocol specification and `specification`-status fixtures only. It must not receive Rust source, tests, implementation notes, provisional fixtures, Rust-derived expected outputs or differential reports until the reviewed model is frozen at a recorded revision. Maintenance of the existing clean-room model follows the version-specific v0.8.1 update rules in Section 11.4. The relay-only v0.9 amendment does not trigger another core-model maintenance pass; preserve the reviewed v0.8.1 freeze and correction as immutable evidence and perform the v0.9 work in the Rust relay. Do not ask the Rust implementation agent to produce its own “independent” model after reading the production code; independence cannot be added as a comment after the fact.
+An independently authored Python model must be assigned through a separate clean session whose context contains its pinned protocol specification and `specification`-status fixtures only. It must not receive Rust source, tests, implementation notes, provisional fixtures, Rust-derived expected outputs or differential reports until the reviewed model is frozen at a recorded revision. Maintenance of the existing clean-room model follows the version-specific v0.8.1 update rules in Section 11.4. The relay-only v0.9 amendment and client-presentation-only v0.9.1 clarification do not trigger another core-model maintenance pass; preserve the reviewed v0.8.1 freeze and correction as immutable evidence, retain the reviewed v0.9 relay work, and apply the v0.9.1 classification in the Rust Milestone 5 client surface. Do not ask the Rust implementation agent to produce its own “independent” model after reading the production code; independence cannot be added as a comment after the fact.
 
 ## 15. Definition of v0.1 completion
 
