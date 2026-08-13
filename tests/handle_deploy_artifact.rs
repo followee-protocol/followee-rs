@@ -35,27 +35,57 @@ fn deploy_artifact_example_config_loads_through_the_production_loader() {
     assert_eq!(config.record_count(), 2);
 }
 
+/// The bootstrapped Railway public artifact: the exact domain, local,
+/// DID, and signed record approved for the Milestone 5 public
+/// demonstration. These constants are durable audit evidence — any
+/// change to the deployed identity must change this test deliberately.
+const RAILWAY_DOMAIN: &str = "handle-authority-production.up.railway.app";
+const RAILWAY_LOCAL: &str = "demo";
+const RAILWAY_DID: &str = "did:flw:zQmV2sbfh2M5kHBAa9G1svAdh54bZqGKLUE3YJpBHj8qb4R";
+const RAILWAY_RECORD_FILE: &str = "demo.cose";
+const RAILWAY_RECORD_BYTES: usize = 284;
+const RAILWAY_RECORD_SHA256: &str =
+    "9ece97525772992cdf049cb0387958e93daa4999913a9324ed91db78f513d927";
+
 #[test]
-fn deploy_artifact_template_is_honestly_not_deployable_as_is() {
-    // The checked-in railway configuration is an example/template: its
-    // record is the Appendix B.4 envelope claiming acct:alice@example.com,
-    // which cannot claim a provider-assigned domain. The predeployment
-    // consistency gate must say so; final acceptance requires the
-    // two-phase bootstrap with a freshly signed record.
+fn deploy_artifact_railway_bootstrap_passes_the_production_deployment_gate() {
+    // The Railway artifact is no longer a template: it carries the
+    // bootstrapped public demonstration identity, and the production
+    // predeployment gate must pass on exactly the checked-in bytes.
+    // (Deployment and the live public probes have not yet occurred; this
+    // pins the artifact those steps will publish.)
+    let record =
+        std::fs::read(artifact_dir().join("railway").join(RAILWAY_RECORD_FILE)).expect("readable");
+    assert_eq!(record.len(), RAILWAY_RECORD_BYTES, "record size is pinned");
+    assert_eq!(
+        hex::encode(followee::crypto::sha256(&record)),
+        RAILWAY_RECORD_SHA256,
+        "record bytes are pinned by digest"
+    );
+
     let config = AuthorityConfig::load(&artifact_dir().join("railway/authority.json"))
-        .expect("the template validates structurally");
+        .expect("the bootstrapped configuration validates completely");
+    assert_eq!(config.domain(), RAILWAY_DOMAIN);
+    assert_eq!(config.handle_count(), 1, "one local, no aliases");
+    assert_eq!(config.record_count(), 1);
+
     let report = config.deployment_consistency();
     assert!(
-        !report.consistent,
-        "the template must not silently pass the deployment gate"
+        report.consistent,
+        "the artifact is deployable as checked in"
     );
-    assert!(
-        report
-            .entries
-            .iter()
-            .filter(|e| e.has_record)
-            .all(|e| e.record_verified && e.claimed.is_none()),
-        "records verify but claim a different (example.com) handle"
+    assert_eq!(report.entries.len(), 1, "no extra mappings");
+    let entry = &report.entries[0];
+    assert_eq!(entry.local, RAILWAY_LOCAL);
+    assert_eq!(entry.did, RAILWAY_DID);
+    assert!(entry.has_record);
+    assert!(entry.record_verified, "production verification succeeded");
+    let resource = format!("acct:{RAILWAY_LOCAL}@{RAILWAY_DOMAIN}");
+    assert_eq!(entry.resource, resource);
+    assert_eq!(
+        entry.claimed.as_deref(),
+        Some(resource.as_str()),
+        "the signed alsoKnownAs claims the exact deployed handle"
     );
 }
 

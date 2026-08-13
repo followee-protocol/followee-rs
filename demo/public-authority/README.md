@@ -27,26 +27,49 @@ configuration format, command surface, and JRD semantics.
 | `alice.cose` | Example bootstrap record: the exact Appendix B.4 test envelope |
 | `railway/Dockerfile` | Reproducible multi-stage container build (pinned toolchain, `--locked`) |
 | `railway/entrypoint.sh` | Container start: binds `0.0.0.0:$PORT`, explicit public base URI |
-| `railway/authority.json` | **Example/template** configuration baked into the image (must be replaced by the two-phase bootstrap below before final acceptance) |
-| `railway/alice.cose` | Copy of the example record referenced by the template |
+| `railway/authority.json` | **Bootstrapped Railway public artifact**: maps `demo@handle-authority-production.up.railway.app` to the demonstration DID |
+| `railway/demo.cose` | The bootstrapped public signed record baked into the image (284 bytes, SHA-256 below) |
+| `railway/alice.cose` | Leftover template-era copy of the Appendix B.4 example record; no longer referenced by the Dockerfile, configuration, or tests |
 | `../../railway.json` | Railway config-as-code pointing at the Dockerfile |
 | `../../.dockerignore` | Bounded container build context |
 | `Caddyfile` | VPS: TLS-terminating reverse proxy (automatic HTTPS) |
 | `nginx.conf` | VPS: equivalent nginx TLS-termination snippet |
 | `followee-handle.service` | VPS: hardened systemd unit for the authority process |
 
-The checked-in identities are the **published Appendix B test vectors**
-(public test material; they must never be used for a real identity), and
-the checked-in `alice.cose` is the exact Appendix B.4 envelope whose
-signed `alsoKnownAs` claims `acct:alice@example.com`. A signed claim is
-immutable: no configuration, environment variable, or provider setting
-can change it. The checked-in files are therefore an **example/template
-only** — they cannot satisfy a provider-assigned domain handle, the
-predeployment consistency gate rejects them for public deployment
-(pinned by `deploy_artifact_template_is_honestly_not_deployable_as_is`),
-and final acceptance requires the two-phase bootstrap below with a
-freshly signed record. No purchased domain or ICP dependency is required
-or involved.
+Two kinds of material live here and must not be confused:
+
+- **Generic example/template material** — `authority.example.json` and
+  `alice.cose` (plus the now-unreferenced `railway/alice.cose` copy) use
+  the published Appendix B test vectors (public test material; never for
+  a real identity). The B.4 record's signed `alsoKnownAs` claims
+  `acct:alice@example.com`, and a signed claim is immutable — no
+  configuration, environment variable, or provider setting can change it
+  — so this material can never pass the deployment gate for a
+  provider-assigned domain. It exists for local tests, documentation,
+  and as a template for other operators.
+- **The bootstrapped Railway public artifact** — `railway/authority.json`
+  and `railway/demo.cose` carry the completed Milestone 5 identity
+  bootstrap and **pass the production predeployment gate as checked in**
+  (pinned by
+  `deploy_artifact_railway_bootstrap_passes_the_production_deployment_gate`).
+  Durable audit facts:
+
+  | Fact | Value |
+  | --- | --- |
+  | Public domain | `handle-authority-production.up.railway.app` |
+  | Handle | `demo@handle-authority-production.up.railway.app` |
+  | DID | `did:flw:zQmV2sbfh2M5kHBAa9G1svAdh54bZqGKLUE3YJpBHj8qb4R` |
+  | Record | `railway/demo.cose`, 284 bytes |
+  | Record SHA-256 | `9ece97525772992cdf049cb0387958e93daa4999913a9324ed91db78f513d927` |
+
+  The private seed files remain solely in local operator custody outside
+  this repository; only the public configuration and signed public
+  record are checked in or baked into the image. **Deployment and the
+  live public probes have not yet occurred**: the artifact is prepared,
+  and final Milestone 5 acceptance still requires committing this
+  revision, deploying it to Railway, and running the section 5 probes.
+
+No purchased domain or ICP dependency is required or involved.
 
 ## 1. What the service must provide (specification section 10)
 
@@ -119,7 +142,14 @@ public configuration, and the public record bytes — nothing else.
 Deployment is a **two-phase identity bootstrap** (performed by the
 operator; **not** performed by this repository's tooling), because the
 provider assigns the domain first and the demonstration identity must
-then sign a record claiming a handle under exactly that domain:
+then sign a record claiming a handle under exactly that domain.
+
+> **Status:** both phases below are complete for
+> `handle-authority-production.up.railway.app`; the resulting artifact
+> is checked in beside this file and passes the consistency gate. The
+> steps are retained verbatim so the bootstrap is reproducible for any
+> other domain. What remains is: commit this revision, `railway up`, and
+> the section 5 public probes.
 
 **Phase 1 — obtain the domain.**
 
@@ -238,11 +268,13 @@ SIGTERM.
 
 These commands constitute the external Milestone 5 acceptance gate and
 are run only once the service is deployed (they need the public
-Internet). Replace the domain with the provider-assigned one:
+Internet). The values below are the bootstrapped Railway artifact's;
+substitute your own for any other deployment:
 
 ```bash
-DOMAIN=your-domain.example     # e.g. followee-demo.up.railway.app
-LOCAL=alice
+DOMAIN=handle-authority-production.up.railway.app
+LOCAL=demo
+DID=did:flw:zQmV2sbfh2M5kHBAa9G1svAdh54bZqGKLUE3YJpBHj8qb4R
 
 # 1. Raw WebFinger probe: expect HTTP 200, Content-Type
 #    application/jrd+json, Access-Control-Allow-Origin: *, subject
@@ -274,9 +306,9 @@ target/release/followee handle verify --handle "$LOCAL@$DOMAIN" \
 Step 4 must report the mapped DID with `"status": "discovered"`; step 5
 passes only when `followee handle verify` exits `0` **and** reports
 `"handleVerified": true` — which requires the record to claim the exact
-handle and the domain to map it back to the same DID. (`$LOCAL` and
-`$DID` are the local and DID deployed in phase 2, e.g. `demo` and the
-DID from `identity.json`.)
+handle and the domain to map it back to the same DID. For probe 5,
+`path/to/record.cose` is the deployed public record — for the
+bootstrapped artifact, `demo/public-authority/railway/demo.cose`.
 
 ## 6. What this deployment never does
 

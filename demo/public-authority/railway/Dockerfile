@@ -27,7 +27,7 @@ COPY --from=build /src/target/release/followee /usr/local/bin/followee
 # The reviewed public configuration and the public signed record it
 # references (paths inside the configuration are relative to /app).
 COPY demo/public-authority/railway/authority.json /app/authority.json
-COPY demo/public-authority/railway/alice.cose /app/alice.cose
+COPY demo/public-authority/railway/demo.cose /app/demo.cose
 COPY demo/public-authority/railway/entrypoint.sh /usr/local/bin/followee-entrypoint
 RUN chmod 0555 /usr/local/bin/followee-entrypoint && chown -R followee /app
 USER followee

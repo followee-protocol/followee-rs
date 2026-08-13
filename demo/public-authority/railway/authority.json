@@ -1,16 +1,11 @@
 {
   "version": 1,
-  "domain": "your-domain.example",
+  "domain": "handle-authority-production.up.railway.app",
   "handles": [
     {
-      "local": "alice",
-      "did": "did:flw:zQmPcGstBa7wW9hoYQbS6JZ4UxwZmoKr7YVf9y7qxiyD3Cm",
-      "aliases": ["Alice"],
-      "record": "alice.cose"
-    },
-    {
-      "local": "bob",
-      "did": "did:flw:zQmdGJbJu6pBbiyZX9gJHBTFxnUCtBgRa7mZRcKKs1TcFEy"
+      "local": "demo",
+      "did": "did:flw:zQmV2sbfh2M5kHBAa9G1svAdh54bZqGKLUE3YJpBHj8qb4R",
+      "record": "demo.cose"
     }
   ]
 }

@@ -25,6 +25,12 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
+/// The bootstrapped Railway public artifact facts (kept in lockstep with
+/// `handle_deploy_artifact.rs`).
+const RAILWAY_DOMAIN: &str = "handle-authority-production.up.railway.app";
+const RAILWAY_BASE: &str = "https://handle-authority-production.up.railway.app/";
+const RAILWAY_DID: &str = "did:flw:zQmV2sbfh2M5kHBAa9G1svAdh54bZqGKLUE3YJpBHj8qb4R";
+
 fn artifact_dir() -> &'static Path {
     Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -44,8 +50,8 @@ fn stage_app(dir: &Path) -> (PathBuf, PathBuf) {
     )
     .expect("config staged");
     std::fs::copy(
-        artifact_dir().join("railway/alice.cose"),
-        app.join("alice.cose"),
+        artifact_dir().join("railway/demo.cose"),
+        app.join("demo.cose"),
     )
     .expect("record staged");
     let bin = dir.join("bin");
@@ -86,10 +92,7 @@ fn railway_entrypoint_serves_the_production_authority_on_the_injected_port() {
     let mut child = spawn_entrypoint(
         &app,
         &bin,
-        &[
-            ("PORT", "0"),
-            ("FOLLOWEE_BASE_URI", "https://your-domain.example/"),
-        ],
+        &[("PORT", "0"), ("FOLLOWEE_BASE_URI", RAILWAY_BASE)],
     );
     let mut stdout = BufReader::new(child.stdout.take().expect("stdout piped"));
     let mut line = String::new();
@@ -108,12 +111,12 @@ fn railway_entrypoint_serves_the_production_authority_on_the_injected_port() {
         .parse()
         .expect("numeric port");
     assert_ne!(port, 0, "the assigned port is reported");
-    assert_eq!(startup["baseUri"], "https://your-domain.example/");
+    assert_eq!(startup["baseUri"], RAILWAY_BASE);
     assert_eq!(
         startup["developmentMode"], false,
         "an HTTPS base URI is conforming mode behind provider TLS"
     );
-    assert_eq!(startup["domain"], "your-domain.example");
+    assert_eq!(startup["domain"], RAILWAY_DOMAIN);
 
     // The tested JRD semantics through the production WebFinger client
     // over a real socket — the same probe the deployed domain receives.
@@ -126,21 +129,21 @@ fn railway_entrypoint_serves_the_production_authority_on_the_injected_port() {
         max_response_bytes: 1024 * 1024,
         max_requests: 16,
     });
-    let handle = Handle::parse("alice@your-domain.example").expect("parses");
+    let handle = Handle::parse(&format!("demo@{RAILWAY_DOMAIN}")).expect("parses");
     let discovery = client
         .lookup(&handle, Some(&endpoint), &mut meter)
         .expect("discovers");
-    assert_eq!(discovery.did, alice_did());
-    assert_eq!(discovery.resource, "acct:alice@your-domain.example");
+    assert_eq!(discovery.did.as_str(), RAILWAY_DID);
+    assert_eq!(discovery.resource, format!("acct:demo@{RAILWAY_DOMAIN}"));
     assert_eq!(discovery.record_links.len(), 1);
     // Bootstrap record links advertise the configured public base, never
     // anything derived from this request.
     assert!(
-        discovery.record_links[0].starts_with("https://your-domain.example/"),
+        discovery.record_links[0].starts_with(RAILWAY_BASE),
         "{}",
         discovery.record_links[0]
     );
-    let unknown = Handle::parse("nobody@your-domain.example").expect("parses");
+    let unknown = Handle::parse(&format!("nobody@{RAILWAY_DOMAIN}")).expect("parses");
     assert!(
         client
             .lookup(&unknown, Some(&endpoint), &mut meter)
@@ -174,17 +177,14 @@ fn railway_entrypoint_derives_the_base_uri_from_the_provider_domain() {
     let mut child = spawn_entrypoint(
         &app,
         &bin,
-        &[
-            ("PORT", "0"),
-            ("RAILWAY_PUBLIC_DOMAIN", "your-domain.example"),
-        ],
+        &[("PORT", "0"), ("RAILWAY_PUBLIC_DOMAIN", RAILWAY_DOMAIN)],
     );
     let mut stdout = BufReader::new(child.stdout.take().expect("stdout piped"));
     let mut line = String::new();
     stdout.read_line(&mut line).expect("startup line");
     let startup: Value = serde_json::from_str(&line).expect("startup is one JSON object");
     assert_eq!(
-        startup["baseUri"], "https://your-domain.example/",
+        startup["baseUri"], RAILWAY_BASE,
         "the base URI derives from the provider-assigned domain variable"
     );
     let _ = Command::new("kill")
@@ -279,7 +279,7 @@ fn railway_entrypoint_honours_a_real_nonzero_injected_port() {
         &bin,
         &[
             ("PORT", port_text.as_str()),
-            ("FOLLOWEE_BASE_URI", "https://your-domain.example/"),
+            ("FOLLOWEE_BASE_URI", RAILWAY_BASE),
         ],
     );
     let mut stdout = BufReader::new(child.stdout.take().expect("stdout piped"));
@@ -301,11 +301,11 @@ fn railway_entrypoint_honours_a_real_nonzero_injected_port() {
         max_response_bytes: 1024 * 1024,
         max_requests: 16,
     });
-    let handle = Handle::parse("alice@your-domain.example").expect("parses");
+    let handle = Handle::parse(&format!("demo@{RAILWAY_DOMAIN}")).expect("parses");
     let discovery = client
         .lookup(&handle, Some(&endpoint), &mut meter)
         .expect("reachable on the injected port");
-    assert_eq!(discovery.did, alice_did());
+    assert_eq!(discovery.did.as_str(), RAILWAY_DID);
 
     let pid = child.id().to_string();
     assert!(
