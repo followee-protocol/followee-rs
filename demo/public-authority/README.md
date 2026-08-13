@@ -64,10 +64,27 @@ Two kinds of material live here and must not be confused:
 
   The private seed files remain solely in local operator custody outside
   this repository; only the public configuration and signed public
-  record are checked in or baked into the image. **Deployment and the
-  live public probes have not yet occurred**: the artifact is prepared,
-  and final Milestone 5 acceptance still requires committing this
-  revision, deploying it to Railway, and running the section 5 probes.
+  record are checked in or baked into the image.
+
+  **Deployed and live-probed.** On 2026-08-13 this artifact was deployed
+  to Railway (project `85fd8851-bae0-4e23-b003-5bdf2cb9f6f7`, service
+  `8e2ce593-d677-47a0-91c1-2d1a3cd1ac4a`, initial accepted deployment
+  `799fbd4b-e605-4fa2-9116-a080213e0226`) and the complete section 5
+  public probe set passed against
+  `https://handle-authority-production.up.railway.app/`: startup
+  reported the exact base URI, domain, `developmentMode: false`, one
+  handle and one record on `0.0.0.0:8080`; the raw WebFinger probe
+  answered HTTP 200 with `application/jrd+json`,
+  `Access-Control-Allow-Origin: *`, the exact subject, and exactly one
+  Followee DID relation carrying the DID above; an unknown handle
+  returned 404 and a missing `resource` parameter 400, each with an
+  empty body; the production `followee handle resolve` discovered the
+  DID and selected a verified fresh admissible Root winner; the
+  production `followee handle verify` exited 0 with
+  `handleVerified: true` and inverse status `matched`; and the live
+  `/record/demo` response was 284 bytes, SHA-256
+  `9ece97525772992cdf049cb0387958e93daa4999913a9324ed91db78f513d927`,
+  byte-identical to the checked-in `railway/demo.cose`.
 
 No purchased domain or ICP dependency is required or involved.
 
@@ -145,11 +162,11 @@ provider assigns the domain first and the demonstration identity must
 then sign a record claiming a handle under exactly that domain.
 
 > **Status:** both phases below are complete for
-> `handle-authority-production.up.railway.app`; the resulting artifact
-> is checked in beside this file and passes the consistency gate. The
-> steps are retained verbatim so the bootstrap is reproducible for any
-> other domain. What remains is: commit this revision, `railway up`, and
-> the section 5 public probes.
+> `handle-authority-production.up.railway.app`, the artifact is checked
+> in beside this file, it passes the consistency gate, **and the
+> deployment plus the complete section 5 live probes have passed** (see
+> the evidence block in the overview above). The steps are retained
+> verbatim so the bootstrap is reproducible for any other domain.
 
 **Phase 1 — obtain the domain.**
 
@@ -294,13 +311,28 @@ target/release/followee handle resolve --handle "$LOCAL@$DOMAIN"
 
 # 5. Inverse verification against the deployed record (its alsoKnownAs
 #    contains acct:$LOCAL@$DOMAIN by the predeployment gate). The probe
-#    ASSERTS success: exit status 0 and handleVerified true — merely
-#    running the command proves nothing.
-target/release/followee handle verify --handle "$LOCAL@$DOMAIN" \
-    --did "$DID" --record path/to/record.cose \
-    | tee /dev/stderr | grep -q '"handleVerified":true' \
-    && echo "PROBE 5 OK: handleVerified" \
-    || { echo "PROBE 5 FAILED"; exit 1; }
+#    ASSERTS success — merely running the command proves nothing. The
+#    output and the followee process's exit status are captured
+#    separately (a pipeline would not preserve the status without
+#    pipefail), both are printed, the JSON is parsed, and Boolean
+#    handleVerified must be exactly true. Failure is reported with a
+#    false result, never by exiting the operator's shell.
+probe5_output=$(target/release/followee handle verify \
+    --handle "$LOCAL@$DOMAIN" --did "$DID" \
+    --record demo/public-authority/railway/demo.cose)
+probe5_status=$?
+printf '%s\n' "$probe5_output"
+echo "followee handle verify exit status: $probe5_status"
+if [ "$probe5_status" -eq 0 ] && printf '%s' "$probe5_output" | python3 -c '
+import json, sys
+sys.exit(0 if json.load(sys.stdin).get("handleVerified") is True else 1)
+'
+then
+    echo "PROBE 5 OK: exit status 0 and handleVerified true"
+else
+    echo "PROBE 5 FAILED"
+    false
+fi
 ```
 
 Step 4 must report the mapped DID with `"status": "discovered"`; step 5

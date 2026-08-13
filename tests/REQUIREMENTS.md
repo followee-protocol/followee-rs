@@ -171,10 +171,14 @@ DID-document-projection sections arrive with their milestones.
 | IMPL §13 M5 | Local black-box authority flow over real sockets through the production client; the deployment artifact serves the same JRD semantics as the tested authority | `handle_authority::sec_10_2_real_socket_discovery_and_bootstrap_through_the_production_client`, `authority_restart_from_the_same_configuration_is_deterministic`, `handle_deploy_artifact::*` |
 
 Known intentional gaps at this milestone: DID Document projection
-(§9.6–§9.7) and the remote signer (§18) are later-milestone scope; the
-public HTTPS deployment and Internet probe of the demonstration authority
-are prepared (`demo/public-authority/`) but performed as a separately
-authorized step. `validUntil` staleness is exposed by the resolver
+(§9.6–§9.7) and the remote signer (§18) are later-milestone scope. The
+Milestone 5 external criterion — the demonstration authority behind HTTPS
+on a provider-assigned domain — passed on 2026-08-13: the
+`demo/public-authority/` Railway artifact deployed to
+`https://handle-authority-production.up.railway.app/` and the complete
+live probe set succeeded, including production `handle verify` exiting 0
+with `handleVerified: true` (evidence recorded in
+`demo/public-authority/README.md`). `validUntil` staleness is exposed by the resolver
 (`ResolvedRecord::stale`); richer freshness policy remains
 client-application scope. SQ-20 was resolved by specification v0.9.1 and
 its classification is implemented and pinned as above.
