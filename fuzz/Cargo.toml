@@ -64,3 +64,17 @@ path = "fuzz_targets/relay_response_parse.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "jrd_parse"
+path = "fuzz_targets/jrd_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "webfinger_resource_parse"
+path = "fuzz_targets/webfinger_resource_parse.rs"
+test = false
+doc = false
+bench = false

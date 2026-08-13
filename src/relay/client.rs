@@ -115,6 +115,10 @@ pub struct TransportRequest<'a> {
     pub method: Method,
     /// Absolute request URL, already policy-validated by the client.
     pub url: &'a str,
+    /// `Accept` header value, when the operation states one (WebFinger
+    /// requests send `application/jrd+json`; the relay CBOR operations send
+    /// none, exactly as before).
+    pub accept: Option<&'static str>,
     /// Request body media type, when a body is sent.
     pub content_type: Option<&'static str>,
     /// Request body bytes.
@@ -275,8 +279,10 @@ pub enum ClientError {
         /// The received status code.
         status: u16,
     },
-    /// The 200 response did not carry `application/cbor`.
-    #[error("response media type is not application/cbor")]
+    /// The 200 response did not carry the operation's required media type
+    /// (`application/cbor` for relay operations, `application/jrd+json` for
+    /// WebFinger, `application/cose` for a bootstrap record).
+    #[error("response media type is not the one the operation requires")]
     MediaType,
     /// The response body exceeded the applicable size bound.
     #[error("response exceeds the applicable size bound")]
@@ -493,13 +499,20 @@ impl std::fmt::Debug for RelayClient<'_> {
 }
 
 /// One client-level exchange description consumed by [`RelayClient`]'s
-/// internal request loop.
-struct Exchange<'a> {
-    method: Method,
-    url: &'a str,
-    content_type: Option<&'static str>,
-    body: &'a [u8],
-    max_response_bytes: u64,
+/// internal request loop. The WebFinger client reuses this exact loop
+/// (policy validation per hop, budget charging, bounded redirects, media
+/// types, response bounds) through [`RelayClient::exchange`]; nothing about
+/// the loop is relay-specific.
+pub(crate) struct Exchange<'a> {
+    pub(crate) method: Method,
+    pub(crate) url: &'a str,
+    /// `Accept` header for the request, when the operation states one.
+    pub(crate) accept: Option<&'static str>,
+    pub(crate) content_type: Option<&'static str>,
+    pub(crate) body: &'a [u8],
+    pub(crate) max_response_bytes: u64,
+    /// The exact response media-type essence required on HTTP `200`.
+    pub(crate) response_media_type: &'static str,
 }
 
 /// Joins a base URI ending in `/` with a v1 operation path.
@@ -543,7 +556,7 @@ impl<'a> RelayClient<'a> {
     /// status handling, bounded redirect following for GET, media-type
     /// enforcement, and response-size accounting. Returns the response body
     /// bytes for wrapper validation by the caller.
-    fn exchange(
+    pub(crate) fn exchange(
         &self,
         request: Exchange<'_>,
         meter: &mut BudgetMeter,
@@ -552,9 +565,11 @@ impl<'a> RelayClient<'a> {
         let Exchange {
             method,
             url,
+            accept,
             content_type,
             body,
             max_response_bytes,
+            response_media_type,
         } = request;
         let mut current = url.to_owned();
         let mut redirects: u32 = 0;
@@ -565,6 +580,7 @@ impl<'a> RelayClient<'a> {
             let response = self.transport.execute(&TransportRequest {
                 method,
                 url: &current,
+                accept,
                 content_type,
                 body,
                 max_response_bytes,
@@ -584,7 +600,7 @@ impl<'a> RelayClient<'a> {
                             .trim()
                             .to_ascii_lowercase()
                     });
-                    if essence.as_deref() != Some(APPLICATION_CBOR) {
+                    if essence.as_deref() != Some(response_media_type) {
                         return Err(ClientError::MediaType);
                     }
                     return Ok(response.body);
@@ -643,9 +659,11 @@ impl<'a> RelayClient<'a> {
             Exchange {
                 method: Method::Get,
                 url: &url,
+                accept: None,
                 content_type: None,
                 body: &[],
                 max_response_bytes: MAX_SMALL_RESPONSE_BYTES,
+                response_media_type: APPLICATION_CBOR,
             },
             meter,
             &mut contacted,
@@ -670,9 +688,11 @@ impl<'a> RelayClient<'a> {
             Exchange {
                 method: Method::Get,
                 url: &url,
+                accept: None,
                 content_type: None,
                 body: &[],
                 max_response_bytes: MAX_DIRECTORY_RESPONSE_BYTES,
+                response_media_type: APPLICATION_CBOR,
             },
             meter,
             &mut contacted,
@@ -701,9 +721,11 @@ impl<'a> RelayClient<'a> {
             Exchange {
                 method: Method::Post,
                 url: &url,
+                accept: None,
                 content_type: Some(APPLICATION_COSE),
                 body: record,
                 max_response_bytes: MAX_SMALL_RESPONSE_BYTES,
+                response_media_type: APPLICATION_CBOR,
             },
             meter,
             &mut contacted,
@@ -740,9 +762,11 @@ impl<'a> RelayClient<'a> {
             Exchange {
                 method: Method::Post,
                 url: &url,
+                accept: None,
                 content_type: Some(APPLICATION_CBOR),
                 body: &request,
                 max_response_bytes: MAX_RESOLVE_RESPONSE_BYTES,
+                response_media_type: APPLICATION_CBOR,
             },
             meter,
             &mut contacted,
@@ -790,9 +814,11 @@ impl<'a> RelayClient<'a> {
             Exchange {
                 method: Method::Post,
                 url: &url,
+                accept: None,
                 content_type: Some(APPLICATION_CBOR),
                 body: &request,
                 max_response_bytes: byte_limit,
+                response_media_type: APPLICATION_CBOR,
             },
             meter,
             &mut contacted,
@@ -894,6 +920,9 @@ impl Transport for HttpTransport {
             Method::Get => client.get(request.url),
             Method::Post => client.post(request.url).body(request.body.to_vec()),
         };
+        if let Some(accept) = request.accept {
+            req = req.header(reqwest::header::ACCEPT, accept);
+        }
         if let Some(content_type) = request.content_type {
             req = req.header(reqwest::header::CONTENT_TYPE, content_type);
         }
@@ -1060,6 +1089,7 @@ mod tests {
         let refused = transport.execute(&TransportRequest {
             method: Method::Get,
             url: "https://10.0.0.7/v1/info",
+            accept: None,
             content_type: None,
             body: &[],
             max_response_bytes: 1024,
@@ -1076,6 +1106,7 @@ mod tests {
         let io = transport.execute(&TransportRequest {
             method: Method::Get,
             url: "http://127.0.0.1:9/v1/info",
+            accept: None,
             content_type: None,
             body: &[],
             max_response_bytes: 1024,
@@ -1095,6 +1126,7 @@ mod tests {
         let named = transport.execute(&TransportRequest {
             method: Method::Get,
             url: "http://localhost:9/v1/info",
+            accept: None,
             content_type: None,
             body: &[],
             max_response_bytes: 1024,

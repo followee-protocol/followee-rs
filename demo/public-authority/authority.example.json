@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "domain": "your-domain.example",
+  "handles": [
+    {
+      "local": "alice",
+      "did": "did:flw:zQmPcGstBa7wW9hoYQbS6JZ4UxwZmoKr7YVf9y7qxiyD3Cm",
+      "aliases": ["Alice"],
+      "record": "alice.cose"
+    },
+    {
+      "local": "bob",
+      "did": "did:flw:zQmdGJbJu6pBbiyZX9gJHBTFxnUCtBgRa7mZRcKKs1TcFEy"
+    }
+  ]
+}

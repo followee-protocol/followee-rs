@@ -1,0 +1,21 @@
+# Bounded container build context for the demonstration handle authority
+# (demo/public-authority/railway/Dockerfile). Everything the locked build
+# needs is Cargo.toml/Cargo.lock, rust-toolchain.toml, src/, and the
+# public-authority artifact; everything heavy or irrelevant is excluded.
+.git
+.github
+target
+debug
+fuzz/target
+fuzz/corpus
+fuzz/artifacts
+mutants.out
+mutants.out.old
+mutants.m5
+mutants.m5.confirm
+mutants.m5.final
+tests
+tools
+examples
+demo/three_relay_demo.sh
+*.profraw

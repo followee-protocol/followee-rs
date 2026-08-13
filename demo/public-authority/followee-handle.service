@@ -1,0 +1,25 @@
+# systemd unit for the Followee demonstration handle authority.
+# Edit the paths and the public base URI, then:
+#   sudo systemctl enable --now followee-handle
+[Unit]
+Description=Followee demonstration WebFinger handle authority
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# No secrets exist in this service: the configuration holds public DIDs
+# and already signed public records only.
+ExecStart=/usr/local/bin/followee handle serve \
+    --config /etc/followee/authority.json \
+    --listen 127.0.0.1:8130 \
+    --base-uri https://your-domain.example/
+Restart=on-failure
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

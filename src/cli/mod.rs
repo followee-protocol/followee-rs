@@ -14,6 +14,7 @@
 //! error name, and never place secret material in command lines, output,
 //! diagnostics, errors, or panics.
 
+mod handle;
 pub mod json;
 pub mod keyfile;
 mod network;
@@ -112,6 +113,31 @@ pub enum CliError {
         /// The complete resolution result object.
         detail: Box<Value>,
     },
+    /// The production WebFinger client failed; the layer that failed
+    /// (handle form, policy, transport, HTTP, JRD parse, mapping
+    /// requirement) is preserved in the symbol.
+    #[error("webfinger failure: {0}")]
+    WebFinger(#[from] crate::webfinger::WebFingerError),
+    /// The handle-verification operation completed and the handle is not
+    /// verified for the record. The complete machine-readable result is
+    /// carried alongside the symbolic failure.
+    #[error("the handle is not verified for this record")]
+    HandleUnverified {
+        /// The complete handle-verification result object.
+        detail: Box<Value>,
+    },
+    /// The handle-authority configuration failed validation.
+    #[error("authority configuration: {0}")]
+    AuthorityConfig(#[from] crate::webfinger::authority::ConfigError),
+    /// The predeployment consistency check completed and the
+    /// configuration is not deployable: a served bootstrap record does
+    /// not claim the exact handle it would be served for. The complete
+    /// machine-readable report is carried alongside the symbolic failure.
+    #[error("the configuration is not consistent for public deployment")]
+    DeploymentInconsistent {
+        /// The complete consistency report object.
+        detail: Box<Value>,
+    },
 }
 
 impl CliError {
@@ -146,6 +172,10 @@ impl CliError {
             CliError::Sync(e) => e.symbol(),
             CliError::PublishRejected(_) => "publishRejected",
             CliError::ResolutionFailed { symbol, .. } => symbol,
+            CliError::WebFinger(e) => e.symbol(),
+            CliError::HandleUnverified { .. } => "handleUnverified",
+            CliError::AuthorityConfig(_) => "authorityConfig",
+            CliError::DeploymentInconsistent { .. } => "deploymentInconsistent",
         }
     }
 }
@@ -174,6 +204,21 @@ enum TopCommand {
     Relay(RelayCommand),
     /// Resolve a DID through the multi-relay production resolver.
     Resolve(ResolveArgs),
+    /// Handle discovery, verification, and the demonstration authority.
+    #[command(subcommand)]
+    Handle(HandleCommand),
+}
+
+#[derive(Subcommand, Debug)]
+enum HandleCommand {
+    /// Discover the Followee DID mapped to a handle through the production
+    /// WebFinger client, with optional current-record bootstrap.
+    Resolve(HandleResolveArgs),
+    /// Verify a handle claim: local record verification combined with
+    /// inverse WebFinger discovery binding the same DID.
+    Verify(HandleVerifyArgs),
+    /// Run the minimal demonstration handle authority.
+    Serve(HandleServeArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -426,6 +471,11 @@ struct ResolveArgs {
     /// Resolution deadline duration in milliseconds.
     #[arg(long, default_value_t = 10_000)]
     deadline_ms: u64,
+    /// Check the winning record's migration claims reciprocally through
+    /// the same shared operation budgets, reporting one of the three
+    /// section 14.2 states per claim. Never re-follows automatically.
+    #[arg(long)]
+    check_migration: bool,
 }
 
 #[derive(Args, Debug)]
@@ -443,6 +493,94 @@ struct ServeArgs {
     /// with the bound loopback address.
     #[arg(long)]
     base_uri: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct HandleResolveArgs {
+    /// The handle, local@domain.
+    #[arg(long)]
+    handle: String,
+    /// Network policy for connections.
+    #[arg(long, value_enum, default_value_t = PolicyArg::Public)]
+    policy: PolicyArg,
+    /// Explicit authority endpoint base ending in '/', for loopback tests
+    /// under the development policy only; public lookups always derive the
+    /// endpoint from the handle domain.
+    #[arg(long)]
+    endpoint: Option<String>,
+    /// Do not fetch bootstrap record links.
+    #[arg(long)]
+    no_bootstrap: bool,
+    /// Optional client-state file: sticky authority state and cached
+    /// verified records persist across invocations.
+    #[arg(long)]
+    state: Option<PathBuf>,
+    /// Recipient time override for deterministic classification.
+    #[arg(long)]
+    now_ms: Option<u64>,
+    /// Per-request timeout in milliseconds.
+    #[arg(long, default_value_t = 10_000)]
+    timeout_ms: u64,
+}
+
+#[derive(Args, Debug)]
+struct HandleVerifyArgs {
+    /// The handle, local@domain.
+    #[arg(long)]
+    handle: String,
+    /// The expected Followee DID: the durable identity key the follower
+    /// already holds. Discovery never chooses it.
+    #[arg(long)]
+    did: String,
+    /// A local complete COSE record file to verify (offline record source).
+    #[arg(long)]
+    record: Option<PathBuf>,
+    /// Relay base URIs to resolve the record through (network record
+    /// source); repeatable.
+    #[arg(long = "relay")]
+    relays: Vec<String>,
+    /// Network policy for connections.
+    #[arg(long, value_enum, default_value_t = PolicyArg::Public)]
+    policy: PolicyArg,
+    /// Explicit authority endpoint base ending in '/', for loopback tests
+    /// under the development policy only.
+    #[arg(long)]
+    endpoint: Option<String>,
+    /// Optional client-state file.
+    #[arg(long)]
+    state: Option<PathBuf>,
+    /// Recipient time override for deterministic classification.
+    #[arg(long)]
+    now_ms: Option<u64>,
+    /// Per-request timeout in milliseconds.
+    #[arg(long, default_value_t = 10_000)]
+    timeout_ms: u64,
+    /// Operation deadline duration in milliseconds.
+    #[arg(long, default_value_t = 10_000)]
+    deadline_ms: u64,
+}
+
+#[derive(Args, Debug)]
+struct HandleServeArgs {
+    /// The authority configuration JSON file.
+    #[arg(long)]
+    config: PathBuf,
+    /// Listen address. Loopback by default; port 0 assigns an ephemeral
+    /// port, reported in the startup object.
+    #[arg(long, default_value = "127.0.0.1:0")]
+    listen: String,
+    /// Advertised canonical base URI ending in `/`. An HTTPS URI selects
+    /// conforming mode (for operation behind provider TLS termination);
+    /// when omitted the authority runs in explicitly non-conforming
+    /// development mode with the bound loopback address.
+    #[arg(long)]
+    base_uri: Option<String>,
+    /// Run the predeployment consistency check instead of serving:
+    /// validate the configuration completely, require every local served
+    /// with a bootstrap record to be exactly claimed by that record, and
+    /// exit nonzero on any mismatch.
+    #[arg(long)]
+    check: bool,
 }
 
 /// Runs the CLI with injected environment and output streams, returning the
@@ -488,6 +626,18 @@ pub fn run(
                     object.insert("resolution".to_owned(), (**detail).clone());
                 }
             }
+            // Likewise a completed-but-unverified handle check.
+            if let CliError::HandleUnverified { detail } = &error {
+                if let Some(object) = payload.as_object_mut() {
+                    object.insert("handleVerification".to_owned(), (**detail).clone());
+                }
+            }
+            // And a completed-but-failed deployment consistency check.
+            if let CliError::DeploymentInconsistent { detail } = &error {
+                if let Some(object) = payload.as_object_mut() {
+                    object.insert("consistency".to_owned(), (**detail).clone());
+                }
+            }
             let _ = writeln!(stdout, "{payload}");
             let _ = writeln!(stderr, "error[{}]: {error}", error.symbol());
             if matches!(error, CliError::Usage(_)) {
@@ -531,6 +681,15 @@ fn dispatch(
         }
         TopCommand::Relay(RelayCommand::Sync(args)) => network::relay_sync(&args, rng).map(Some),
         TopCommand::Resolve(args) => network::resolve_multi(&args, clock).map(Some),
+        TopCommand::Handle(HandleCommand::Resolve(args)) => {
+            handle::handle_resolve(&args, clock).map(Some)
+        }
+        TopCommand::Handle(HandleCommand::Verify(args)) => {
+            handle::handle_verify(&args, clock).map(Some)
+        }
+        TopCommand::Handle(HandleCommand::Serve(args)) => {
+            handle::handle_serve(&args, stdout, stderr)
+        }
     }
 }
 
@@ -593,6 +752,9 @@ fn relay_serve(
         )
         .map_err(|e| CliError::Usage(e.to_string()))?;
 
+        // The shutdown listener exists before readiness is advertised, so
+        // a signal racing the startup object still shuts down cleanly.
+        let shutdown = shutdown_signal();
         // The one machine-readable startup object; stdout carries nothing
         // else. Secret material never exists in this command.
         let startup = json!({
@@ -615,33 +777,37 @@ fn relay_serve(
             );
         }
 
-        crate::relay::http::serve_with_shutdown(
-            std::sync::Arc::new(relay),
-            listener,
-            shutdown_signal(),
-        )
-        .await
-        .map_err(|e| CliError::Environment(e.to_string()))?;
+        crate::relay::http::serve_with_shutdown(std::sync::Arc::new(relay), listener, shutdown)
+            .await
+            .map_err(|e| CliError::Environment(e.to_string()))?;
         let _ = writeln!(stderr, "relay stopped");
         Ok(None)
     })
 }
 
-/// Resolves on Ctrl-C, or on SIGTERM where the platform delivers it.
-async fn shutdown_signal() {
+/// Returns a future that resolves on Ctrl-C, or on SIGTERM where the
+/// platform delivers it. The SIGTERM listener is registered at call time
+/// — callers construct this before writing their startup object — so a
+/// signal arriving immediately after startup is advertised still produces
+/// the clean shutdown path rather than the default termination.
+fn shutdown_signal() -> impl std::future::Future<Output = ()> + Send + 'static {
     #[cfg(unix)]
     {
         let mut terminate =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                 .expect("SIGTERM handler installs");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = terminate.recv() => {}
+        async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
         }
     }
     #[cfg(not(unix))]
     {
-        let _ = tokio::signal::ctrl_c().await;
+        async {
+            let _ = tokio::signal::ctrl_c().await;
+        }
     }
 }
 

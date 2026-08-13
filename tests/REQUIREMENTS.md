@@ -1,4 +1,4 @@
-# Requirement traceability (Milestones 1–4)
+# Requirement traceability (Milestones 1–5)
 
 Mapping from testable MUST/MUST NOT requirements in the implemented
 specification sections (pinned commit in IMPLEMENTATION.md §2) to tests.
@@ -10,7 +10,9 @@ sections 7.4, 7.5, 8, and 13 (Milestone 2); the relay sections 5.4
 concurrent-ingress cursor-visibility obligations (§12.6, §13.2, §20.2,
 relay-maintenance pass); and the Milestone 4 relay client, synchronization
 receiver, and multi-relay resolver (§§11.5, 12.1, 12.3, 12.6, 12.7, 13.3,
-14.1, 15.5, Appendix B.11 behavioural gates). WebFinger and
+14.1, 15.5, Appendix B.11 behavioural gates); and the Milestone 5 handle
+discovery, inverse verification, bootstrap, migration presentation, and
+demonstration-authority obligations (§§10.1–10.4, 14.2–14.4, 20.3).
 DID-document-projection sections arrive with their milestones.
 
 | Spec | Requirement | Tests |
@@ -146,9 +148,33 @@ DID-document-projection sections arrive with their milestones.
 | IMPL §8/§13 M4 | Non-interactive `relay publish`/`relay resolve`/`relay changes`/`relay sync` and multi-relay `resolve` with one JSON result, stable symbols, exit conventions, protocol-vs-infrastructure distinction, no secret material, no protocol decisions in handlers | `cli_network_shell` suite; demo transcript; handlers in `src/cli/network.rs` delegate to `relay::client`, `relay::sync`, `resolver` |
 | IMPL §13 M4 | Deterministic three-relay demonstration through real serve processes and production binary surfaces | `three_relay_demo::milestone_4_three_relay_demonstration_passes` running `demo/three_relay_demo.sh` |
 
-Known intentional gaps at this milestone: WebFinger and handle discovery
-(§10), inverse-handle verification, migration presentation states
-(§14.2–§14.4), DID Document projection (§9.6–§9.7), and the remote signer
-(§18) are Milestone 5+ scope. `validUntil` staleness is exposed by the
-resolver (`ResolvedRecord::stale`); richer freshness policy remains
-client-application scope.
+## Milestone 5: handles and public demonstration
+
+| Spec | Requirement | Tests |
+| --- | --- | --- |
+| §10.1 | Handle form `local@domain`: 1–64 ASCII `ALPHA/DIGIT/._-` local, case-sensitive at the protocol layer; domain in lowercase ASCII IDNA form | `webfinger_client::sec_10_1_local_part_grammar_boundaries_are_exact`, `sec_10_1_local_part_is_case_sensitive_at_the_protocol_layer`, `sec_10_1_domain_canonicalizes_to_lowercase_ascii_idna`, `sec_10_1_invalid_domains_are_rejected` |
+| §10.1 | Each returned mapping is verified for the exact canonical resource requested; ASCII-case variants are never assigned to different DIDs (rejected or aliased to one DID) | `webfinger_client::sec_10_2_subject_comparison_is_exact_not_case_folded`, `handle_authority::sec_10_1_case_variants_mapping_to_different_dids_are_rejected_at_load`, `sec_10_1_case_variants_as_aliases_of_one_did_are_accepted`, `sec_10_2_real_socket_discovery_and_bootstrap_through_the_production_client` |
+| §10.2 | Successful mapping requires an in-policy connection, an `application/jrd+json` response, `subject` exactly equal to the requested canonical `acct:` URI, exactly one Followee DID link, and a canonical v1 DID in `href` | `webfinger_client::sec_10_2_exact_subject_with_exactly_one_followee_link_resolves`, `sec_10_2_wrong_subject_is_rejected`, `sec_10_2_missing_subject_is_rejected`, `sec_10_2_zero_followee_links_is_not_a_mapping`, `sec_10_2_two_or_more_followee_links_are_ambiguous`, `sec_10_2_malformed_and_wrong_scheme_did_targets_are_rejected`, `sec_10_2_wrong_media_type_is_rejected` |
+| §10.2 | Untrusted JRD bounds before interpretation: byte cap, nesting, member count, invalid UTF-8, malformed JSON, duplicate member names | `webfinger_client::sec_10_2_oversized_responses_are_rejected_at_the_byte_bound`, `sec_10_2_excessive_nesting_is_rejected`, `sec_10_2_invalid_utf8_bodies_are_rejected`, `sec_10_2_malformed_json_is_rejected`, `sec_10_2_duplicate_member_names_are_rejected_not_collapsed`; `webfinger::jrd::tests::*`; fuzz target `jrd_parse` |
+| §10.2 | Redirects remain within the client's security policy; unsafe destinations and timeouts never become mappings; lookups charge the shared budgets | `webfinger_client::sec_10_2_redirects_must_remain_within_policy`, `sec_10_2_unsafe_literal_destinations_are_rejected_by_policy`, `sec_10_2_timeouts_are_transport_failures_not_mappings`, `sec_14_1_lookups_charge_the_shared_budget` |
+| §10.3 | Bootstrap candidates are opaque bytes fetched within ordinary budgets and fully verified locally; invalid, mismatched, premature, losing, and post-revocation candidates never alter existing state | `handle_bootstrap::sec_10_3_valid_candidate_is_verified_and_selected`, `sec_10_3_invalid_candidate_is_rejected_with_the_production_classification`, `sec_10_3_wrong_did_candidate_fails_identity_binding`, `sec_10_3_premature_candidate_is_excluded_from_selection`, `sec_8_3_losing_candidate_does_not_displace_the_winner`, `sec_14_1_losing_bootstrap_record_cannot_roll_back_cached_state`, `sec_8_2_root_candidate_cannot_win_under_sticky_revocation`, `sec_8_2_root_revoked_bootstrap_candidate_takes_absolute_precedence`, `sec_15_1_oversized_record_bodies_classify_exactly` |
+| §5.5 | A stale record is admissible; staleness is exposed, not hidden, and never blocks revocation activation | `handle_bootstrap::sec_5_5_stale_candidate_is_admissible_but_reported_stale` |
+| §10.4 | An `alsoKnownAs` `acct:` value is only a claim until the exact handle inversely resolves to the same DID; neither direction alone verifies; no transmitted `verified` flag | `handle_verification::sec_10_4_signed_claim_without_successful_inverse_lookup_stays_unverified`, `sec_10_4_both_directions_binding_the_same_did_verifies`, `sec_10_4_inverse_lookup_to_another_did_is_not_verified`, `sec_10_4_mapping_without_a_signed_claim_is_not_verified`, `sec_10_1_claim_matching_is_local_case_sensitive_and_domain_canonical` |
+| §10.4 | Handle disappearance or reassignment changes no followed DID, cached verified identity, or sticky state | `handle_verification::sec_10_4_handle_disappearance_changes_no_local_state`, `sec_10_4_handle_reassignment_changes_no_local_state`, `cli_handle_inprocess::handle_events_never_mutate_the_state_file_identity` |
+| §7.4/§14.2 | Verified requires both winning fresh records to reciprocate; one field alone is an unverified directional self-claim | `migration_states::sec_14_2_reciprocal_fresh_records_are_verified`, `sec_14_2_one_way_claim_is_checked_but_unverified` |
+| §14.2 | All three states are recorded and presented distinctly; Not checked is never a negative result; nothing is cached as failed reciprocity; no automatic re-following | `migration_states::sec_14_2_absent_counterpart_is_not_checked_not_a_negative_result`, `sec_14_2_unavailable_counterpart_is_not_checked`, `sec_7_4_verified_migration_never_re_follows_or_mutates_the_durable_did`, `cli_handle_inprocess::resolve_check_migration_reports_the_three_states_end_to_end` |
+| §5.5/§14.2 (v0.9.1) | A completed check with a stale claimant or stale counterpart is exactly Checked but unverified (`claimantStale`/`counterpartStale`), even when the fields reciprocate; staleness alone never yields Not checked; durable identity and sticky state are byte-identical afterwards | `migration_states::sec_14_2_stale_claimant_is_checked_but_unverified`, `sec_14_2_stale_counterpart_is_checked_but_unverified_even_when_reciprocal`, `sec_14_2_stale_and_non_reciprocal_claims_stay_checked_but_unverified` |
+| §14.1 | Migration hops share the aggregate budgets and are bounded (`max_migration_hops`); a hop never resets any budget | `migration_states::sec_14_1_migration_hop_budget_is_enforced`, `sec_14_1_one_counterpart_in_both_directions_spends_one_hop`, `sec_14_1_migration_hops_share_the_distinct_relay_budget` |
+| §14.3 | Predecessor impersonation is suppressed until reciprocated; nothing implies endorsement | `migration_states::sec_14_3_predecessor_impersonation_is_suppressed_not_presented`; `presentable` flag in `cli_handle_inprocess::resolve_check_migration_reports_the_three_states_end_to_end` |
+| RFC 7033 | The authority answers `400` for a missing, duplicated, or malformed `resource` parameter, `404` for unknown resources, JRD media type and CORS on success | `handle_authority::rfc_7033_resource_query_parsing_is_strict`, `rfc_7033_malformed_queries_receive_http_400_over_real_sockets`, `sec_10_2_real_socket_discovery_and_bootstrap_through_the_production_client`; fuzz target `webfinger_resource_parse` |
+| IMPL §8/§13 M5 | Non-interactive `handle resolve`/`handle verify`/`handle serve` with one JSON result, stable symbols, production components only, no secret material; `handle serve` startup contract, clean shutdown, loopback guard, deterministic restart | `cli_handle_inprocess` suite, `cli_handle_shell` suite |
+| IMPL §13 M5 | Local black-box authority flow over real sockets through the production client; the deployment artifact serves the same JRD semantics as the tested authority | `handle_authority::sec_10_2_real_socket_discovery_and_bootstrap_through_the_production_client`, `authority_restart_from_the_same_configuration_is_deterministic`, `handle_deploy_artifact::*` |
+
+Known intentional gaps at this milestone: DID Document projection
+(§9.6–§9.7) and the remote signer (§18) are later-milestone scope; the
+public HTTPS deployment and Internet probe of the demonstration authority
+are prepared (`demo/public-authority/`) but performed as a separately
+authorized step. `validUntil` staleness is exposed by the resolver
+(`ResolvedRecord::stale`); richer freshness policy remains
+client-application scope. SQ-20 was resolved by specification v0.9.1 and
+its classification is implemented and pinned as above.

@@ -50,6 +50,10 @@ pub struct ResolverBudgets {
     pub max_total_response_bytes: u64,
     /// Resolution deadline duration in milliseconds.
     pub deadline_duration_ms: u64,
+    /// Maximum migration hops (counterpart resolutions) within one
+    /// operation (specification section 14.1). A migration hop never
+    /// resets any aggregate budget.
+    pub max_migration_hops: u32,
 }
 
 impl Default for ResolverBudgets {
@@ -61,7 +65,60 @@ impl Default for ResolverBudgets {
             max_concurrent_requests: 4,
             max_total_response_bytes: 1024 * 1024,
             deadline_duration_ms: 10_000,
+            max_migration_hops: 2,
         }
+    }
+}
+
+/// The shared aggregate accounting for one complete user operation
+/// (specification section 14.1): one [`BudgetMeter`] (deadline, response
+/// bytes, request count) and one distinct-relay set spanning the primary
+/// resolution and every migration hop. Nothing — no relay hop, reference,
+/// or migration hop — resets any of it.
+#[derive(Debug)]
+pub struct OperationScope {
+    meter: BudgetMeter,
+    /// Every distinct normalized base URI contacted in this operation.
+    contacted: BTreeSet<String>,
+    max_relays_visited: usize,
+    migration_hops_used: u32,
+    max_migration_hops: u32,
+}
+
+impl OperationScope {
+    /// Creates the accounting for one operation starting at `now_ms`.
+    #[must_use]
+    pub fn new(budgets: &ResolverBudgets, now_ms: u64) -> OperationScope {
+        OperationScope {
+            meter: BudgetMeter::new(OperationBudget {
+                deadline_ms: Some(now_ms.saturating_add(budgets.deadline_duration_ms)),
+                max_response_bytes: budgets.max_total_response_bytes,
+                // Each visited relay needs at most a resolve plus a
+                // directory fetch; migration hops draw on the same pool.
+                max_requests: (budgets.max_relays_visited as u64)
+                    .saturating_mul(2)
+                    .saturating_add(2),
+            }),
+            contacted: BTreeSet::new(),
+            max_relays_visited: budgets.max_relays_visited,
+            migration_hops_used: 0,
+            max_migration_hops: budgets.max_migration_hops,
+        }
+    }
+
+    /// The shared budget meter.
+    #[must_use]
+    pub fn meter(&mut self) -> &mut BudgetMeter {
+        &mut self.meter
+    }
+
+    /// Charges one migration hop, or refuses when the hop budget is spent.
+    fn charge_migration_hop(&mut self) -> bool {
+        if self.migration_hops_used >= self.max_migration_hops {
+            return false;
+        }
+        self.migration_hops_used = self.migration_hops_used.saturating_add(1);
+        true
     }
 }
 
@@ -151,6 +208,49 @@ impl ClientState {
     /// Restores a routing hint for `did`. Routing state only.
     pub fn restore_route(&mut self, did: &str, route: &str) {
         self.entries.entry(did.to_owned()).or_default().route = Some(route.to_owned());
+    }
+
+    /// Records a locally verified selection outcome for `did`: the one
+    /// production cache-update rule, shared by the resolver and the handle
+    /// commands so no caller reproduces it. Sticky authority state is
+    /// monotonic (a RootRevoked entry is never downgraded), and the cached
+    /// record is replaced only for a Root-to-RootRevoked transition or a
+    /// strictly greater section 8.3 ordering key — never automatically by
+    /// an earlier same-authority record (specification section 14.1).
+    /// Returns whether the cached record was replaced.
+    pub fn record_selection(
+        &mut self,
+        did: &str,
+        authority_state: AuthorityState,
+        record: &VerifiedRecord,
+    ) -> bool {
+        let entry = self.entries.entry(did.to_owned()).or_default();
+        if entry.sticky != AuthorityState::RootRevoked {
+            entry.sticky = authority_state;
+        }
+        let replace = match &entry.cached {
+            None => true,
+            Some(cached) => {
+                let transition = record.authority() == crate::record::Authority::RootRevoked
+                    && cached.authority == crate::record::Authority::Root;
+                transition
+                    || crate::ordering::compare_ordering_keys(
+                        record.timestamp_ms(),
+                        record.body_digest(),
+                        cached.timestamp_ms,
+                        &cached.body_digest,
+                    ) == std::cmp::Ordering::Greater
+            }
+        };
+        if replace {
+            entry.cached = Some(CachedRecord {
+                envelope: record.envelope_bytes().to_vec(),
+                authority: record.authority(),
+                timestamp_ms: record.timestamp_ms(),
+                body_digest: *record.body_digest(),
+            });
+        }
+        replace
     }
 
     /// Iterates over `(did, state)` pairs in DID order.
@@ -306,30 +406,57 @@ pub fn resolve_did(
     state: &mut ClientState,
 ) -> Result<Resolution, VerifyError> {
     let target = FolloweeDid::parse(target_did)?;
-    let now_ms = clock.now_ms().map_err(|_| VerifyError::SchemaViolation);
-    // A clock failure is a local environment failure: surface it as
-    // TemporarilyUnavailable rather than inventing a protocol error.
-    let Ok(now_ms) = now_ms else {
-        return Ok(Resolution {
-            outcome: ResolveOutcome::TemporarilyUnavailable,
-            authority_state: state
-                .get(target.as_str())
-                .map_or(AuthorityState::Unknown, |s| s.sticky),
-            relays_consulted: 0,
-            compressed_route: None,
-            diagnostics: Vec::new(),
-        });
+    let Some(now_ms) = clock_now(clock) else {
+        return Ok(unavailable_resolution(&target, state));
+    };
+    let mut scope = OperationScope::new(&config.budgets, now_ms);
+    resolve_did_in_scope(target_did, config, client, clock, state, &mut scope)
+}
+
+/// The injected clock's reading, or `None` on failure. A clock failure is
+/// a local environment failure surfaced as `TemporarilyUnavailable`, never
+/// an invented protocol error.
+fn clock_now(clock: &dyn Clock) -> Option<u64> {
+    clock.now_ms().ok()
+}
+
+/// The `TemporarilyUnavailable` resolution used when the local
+/// environment fails before any relay is contacted.
+fn unavailable_resolution(target: &FolloweeDid, state: &ClientState) -> Resolution {
+    Resolution {
+        outcome: ResolveOutcome::TemporarilyUnavailable,
+        authority_state: state
+            .get(target.as_str())
+            .map_or(AuthorityState::Unknown, |s| s.sticky),
+        relays_consulted: 0,
+        compressed_route: None,
+        diagnostics: Vec::new(),
+    }
+}
+
+/// [`resolve_did`] inside an existing [`OperationScope`], so one user
+/// operation (for example a resolution followed by its migration checks,
+/// or a handle verification) shares one deadline, byte, request, and
+/// distinct-relay budget across every sub-resolution.
+///
+/// # Errors
+///
+/// Returns `invalidDid`/`unsupportedHash` for a malformed target; every
+/// network condition is reported inside [`Resolution`] instead.
+pub fn resolve_did_in_scope(
+    target_did: &str,
+    config: &ResolverConfig,
+    client: &RelayClient<'_>,
+    clock: &dyn Clock,
+    state: &mut ClientState,
+    scope: &mut OperationScope,
+) -> Result<Resolution, VerifyError> {
+    let target = FolloweeDid::parse(target_did)?;
+    let Some(now_ms) = clock_now(clock) else {
+        return Ok(unavailable_resolution(&target, state));
     };
 
     let budgets = config.budgets;
-    let mut meter = BudgetMeter::new(OperationBudget {
-        deadline_ms: Some(now_ms.saturating_add(budgets.deadline_duration_ms)),
-        max_response_bytes: budgets.max_total_response_bytes,
-        // Each visited relay needs at most a resolve plus a directory fetch.
-        max_requests: (budgets.max_relays_visited as u64)
-            .saturating_mul(2)
-            .saturating_add(2),
-    });
 
     let sticky = state
         .get(target.as_str())
@@ -358,6 +485,7 @@ pub fn resolve_did(
         }
     }
 
+    // Relays queried within this sub-resolution (skip-duplicate set).
     let mut visited: BTreeSet<String> = BTreeSet::new();
     // Cycle detection over (relay instance identifier, DID) for reference
     // targets, alongside the normalized-URI visited set: together these
@@ -373,7 +501,12 @@ pub fn resolve_did(
         if visited.contains(&normalized) {
             continue;
         }
-        if visited.len() >= budgets.max_relays_visited {
+        // The distinct-relay budget spans the complete operation: a base
+        // URI never contacted in this operation consumes it; one already
+        // contacted for another sub-resolution does not consume it again.
+        if !scope.contacted.contains(&normalized)
+            && scope.contacted.len() >= scope.max_relays_visited
+        {
             diagnostics.push(Diagnostic {
                 base_uri: target_relay.base_uri.clone(),
                 event: DiagEvent::BudgetStopped("visited-relay budget"),
@@ -383,9 +516,10 @@ pub fn resolve_did(
         }
         // Every newly contacted base URI counts against the distinct-relay
         // budget, whatever it later advertises.
-        visited.insert(normalized);
+        visited.insert(normalized.clone());
+        scope.contacted.insert(normalized);
 
-        let outcome = client.resolve(&target_relay.base_uri, &[target.as_str()], &mut meter);
+        let outcome = client.resolve(&target_relay.base_uri, &[target.as_str()], &mut scope.meter);
         let response = match outcome {
             Ok(response) => response,
             Err(ClientError::OuterResponse(fault)) => {
@@ -468,7 +602,7 @@ pub fn resolve_did(
                 }
                 // A Ref is interpreted only with the matching directory
                 // generation (section 12.3).
-                match client.directory(&target_relay.base_uri, &mut meter) {
+                match client.directory(&target_relay.base_uri, &mut scope.meter) {
                     Ok(directory) => {
                         let usable = directory.value.directory_generation
                             == response.value.directory_generation;
@@ -564,41 +698,13 @@ pub fn resolve_did(
                 .find(|c| c.record.body_digest() == record.body_digest())
                 .map(|c| (c.source.clone(), c.via_reference))
                 .unwrap_or_default();
-            let entry = state.entries.entry(target.as_str().to_owned()).or_default();
-            // Record the verified authority state. RootRevoked stickiness is
-            // monotonic (already persisted above); a Root winner records
-            // "only Root records verified so far" and can never downgrade a
-            // retained RootRevoked state, because selection under that
-            // sticky state cannot produce a Root winner.
-            entry.sticky = authority_state;
-            // Cache replacement follows ordering: never automatically
-            // replace a cached same-authority record with an earlier one
-            // (section 14.1); the RootRevoked transition always replaces.
-            let replace = match &entry.cached {
-                None => true,
-                Some(cached) => {
-                    let transition = record.authority() == crate::record::Authority::RootRevoked
-                        && cached.authority == crate::record::Authority::Root;
-                    transition
-                        || crate::ordering::compare_ordering_keys(
-                            record.timestamp_ms(),
-                            record.body_digest(),
-                            cached.timestamp_ms,
-                            &cached.body_digest,
-                        ) == std::cmp::Ordering::Greater
-                }
-            };
-            if replace {
-                entry.cached = Some(CachedRecord {
-                    envelope: record.envelope_bytes().to_vec(),
-                    authority: record.authority(),
-                    timestamp_ms: record.timestamp_ms(),
-                    body_digest: *record.body_digest(),
-                });
-            }
+            // The one production cache-update rule (sticky monotonicity
+            // and ordering-gated replacement) lives in record_selection.
+            state.record_selection(target.as_str(), authority_state, &record);
             // Lazy path compression: only after a locally verified
             // successful traversal, and only routing state.
             if source.1 {
+                let entry = state.entries.entry(target.as_str().to_owned()).or_default();
                 entry.route = Some(source.0.clone());
                 compressed_route = entry.route.clone();
             }
@@ -624,4 +730,230 @@ pub fn resolve_did(
         compressed_route,
         diagnostics,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Migration presentation states (specification sections 7.4 and 14.2–14.4)
+// ---------------------------------------------------------------------------
+
+/// The direction of one migration claim in the target's winning record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MigrationDirection {
+    /// The record claims `predecessor = counterpart`: this DID says it
+    /// continues from the counterpart.
+    Predecessor,
+    /// The record claims `successor = counterpart`: this DID invites
+    /// followers to move to the counterpart.
+    Successor,
+}
+
+impl MigrationDirection {
+    /// The stable machine-readable name.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            MigrationDirection::Predecessor => "predecessor",
+            MigrationDirection::Successor => "successor",
+        }
+    }
+}
+
+/// The three normative local states of one migration-relation check
+/// (specification v0.9.1 section 14.2). Only `Verified` permits any
+/// migration-oriented presentation, and even `Verified` never permits
+/// silent following-list replacement: re-following is always a separate,
+/// deliberate user action that this crate does not perform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MigrationState {
+    /// Both winning admissible records were obtained, both are fresh,
+    /// and they reciprocate under section 7.4.
+    Verified,
+    /// The reciprocal test completed against both winning admissible
+    /// records, but they did not reciprocate or at least one was stale
+    /// (v0.9.1: a stale record is admissible, so the check is complete —
+    /// it failed). Present nothing; the failed local test may be
+    /// reported diagnostically.
+    CheckedButUnverified,
+    /// The reciprocal test did not complete: deferred, budget-stopped,
+    /// timed out, unavailable, or no admissible counterpart. Not a
+    /// negative result — it MUST NOT be cached or reported as failed
+    /// reciprocity, and this crate stores no migration state anywhere.
+    NotChecked,
+}
+
+impl MigrationState {
+    /// The stable machine-readable name.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            MigrationState::Verified => "verified",
+            MigrationState::CheckedButUnverified => "checkedButUnverified",
+            MigrationState::NotChecked => "notChecked",
+        }
+    }
+}
+
+/// One completed migration-relation check.
+#[derive(Debug, Clone)]
+pub struct MigrationCheck {
+    /// The claim's direction in the target's winning record.
+    pub direction: MigrationDirection,
+    /// The claimed counterpart DID.
+    pub counterpart: String,
+    /// The recorded local state.
+    pub state: MigrationState,
+    /// A stable machine-readable reason. Completed checks use the
+    /// specification v0.9.1 section 14.2 diagnostic names `reciprocal`,
+    /// `nonReciprocal`, `claimantStale`, and `counterpartStale`;
+    /// incomplete checks use `deferred`, `noAdmissibleCounterpart`,
+    /// `counterpartUnavailable`, or `migrationHopBudget`. These are
+    /// local diagnostics, not wire-protocol error codes.
+    pub reason: &'static str,
+    /// The counterpart resolution, when one was performed (diagnostics
+    /// about this operation; never identity evidence).
+    pub counterpart_resolution: Option<Box<Resolution>>,
+}
+
+/// Extracts the counterpart claimed by `record` in `direction`, if any.
+fn claimed_counterpart(record: &VerifiedRecord, direction: MigrationDirection) -> Option<String> {
+    let migration = record.body().contact.migration.as_ref()?;
+    let did = match direction {
+        MigrationDirection::Predecessor => migration.predecessor.as_ref(),
+        MigrationDirection::Successor => migration.successor.as_ref(),
+    };
+    did.map(|d| d.as_str().to_owned())
+}
+
+/// Whether `counterpart_record` reciprocates the claim `direction` made by
+/// the record of `target` (specification section 7.4): a `successor = B`
+/// claim requires B's record to carry `predecessor = target`; a
+/// `predecessor = A` claim requires A's record to carry
+/// `successor = target`.
+fn reciprocates(
+    counterpart_record: &VerifiedRecord,
+    target: &FolloweeDid,
+    direction: MigrationDirection,
+) -> bool {
+    let Some(migration) = counterpart_record.body().contact.migration.as_ref() else {
+        return false;
+    };
+    let back = match direction {
+        MigrationDirection::Predecessor => migration.successor.as_ref(),
+        MigrationDirection::Successor => migration.predecessor.as_ref(),
+    };
+    back == Some(target)
+}
+
+/// Checks every migration claim in the target's winning record and
+/// records one of the three section 14.2 states per claim, resolving each
+/// counterpart through the production resolver inside the same
+/// [`OperationScope`] (a migration hop never resets any aggregate
+/// budget; the hop count itself is bounded by
+/// [`ResolverBudgets::max_migration_hops`]).
+///
+/// Rules applied here, all from specification v0.9.1 sections 5.5, 7.4,
+/// and 14.2–14.4 (the v0.9.1 amendment resolved SPEC-QUESTIONS.md SQ-20):
+///
+/// - `Verified` requires both winning admissible records, both fresh,
+///   and reciprocity;
+/// - a check that obtains both winning admissible records but finds
+///   either one stale is **complete** and records
+///   `CheckedButUnverified` — `claimantStale` when the target's own
+///   winning record is stale, `counterpartStale` when the counterpart's
+///   is — regardless of whether the migration fields reciprocate; the
+///   counterpart is therefore resolved even when the claimant is stale,
+///   because staleness alone must never produce `NotChecked`;
+/// - both records fresh but not reciprocal is `CheckedButUnverified`
+///   with reason `nonReciprocal`;
+/// - a counterpart that cannot be obtained (`notFound`,
+///   `temporarilyUnavailable`, hop budget) leaves the check incomplete:
+///   `NotChecked`, never a negative result;
+///
+/// Nothing here re-follows, rewrites a durable DID, or caches a migration
+/// state: the result is presentation data for this operation only. The
+/// counterpart resolutions update only the counterparts' own per-DID
+/// cache entries through the ordinary verified paths.
+pub fn check_migration(
+    winner: &ResolvedRecord,
+    target: &FolloweeDid,
+    config: &ResolverConfig,
+    client: &RelayClient<'_>,
+    clock: &dyn Clock,
+    state: &mut ClientState,
+    scope: &mut OperationScope,
+) -> Vec<MigrationCheck> {
+    let mut checks = Vec::new();
+    // One resolution per distinct counterpart DID within this call, so a
+    // record naming the same DID in both directions spends one hop.
+    let mut resolved: BTreeMap<String, (Resolution, Option<(VerifiedRecord, bool)>)> =
+        BTreeMap::new();
+
+    for direction in [
+        MigrationDirection::Predecessor,
+        MigrationDirection::Successor,
+    ] {
+        let Some(counterpart) = claimed_counterpart(&winner.record, direction) else {
+            continue;
+        };
+        // Migration cycle detection uses the Followee DID (section 14.1);
+        // the schema already forbids counterpart == target, and this guard
+        // keeps that invariant even against a future schema change.
+        if counterpart == target.as_str() {
+            continue;
+        }
+        if !resolved.contains_key(&counterpart) {
+            if !scope.charge_migration_hop() {
+                checks.push(MigrationCheck {
+                    direction,
+                    counterpart,
+                    state: MigrationState::NotChecked,
+                    reason: "migrationHopBudget",
+                    counterpart_resolution: None,
+                });
+                continue;
+            }
+            let resolution =
+                match resolve_did_in_scope(&counterpart, config, client, clock, state, scope) {
+                    Ok(resolution) => resolution,
+                    // The counterpart DID text came from a validated
+                    // Contact Document, so this is unreachable; treat a
+                    // failure as an unavailable check rather than panic.
+                    Err(_) => unavailable_resolution(target, state),
+                };
+            let found = match &resolution.outcome {
+                ResolveOutcome::Found(found) => Some((found.record.clone(), found.stale)),
+                _ => None,
+            };
+            resolved.insert(counterpart.clone(), (resolution, found));
+        }
+        let (resolution, found) = &resolved[&counterpart];
+        let (state_value, reason) = match found {
+            // Both winning admissible records were obtained: the check is
+            // complete (v0.9.1 section 14.2). Staleness of either record
+            // fails it; only fresh reciprocity verifies it.
+            Some((record, counterpart_stale)) => {
+                if winner.stale {
+                    (MigrationState::CheckedButUnverified, "claimantStale")
+                } else if *counterpart_stale {
+                    (MigrationState::CheckedButUnverified, "counterpartStale")
+                } else if reciprocates(record, target, direction) {
+                    (MigrationState::Verified, "reciprocal")
+                } else {
+                    (MigrationState::CheckedButUnverified, "nonReciprocal")
+                }
+            }
+            None => match resolution.outcome {
+                ResolveOutcome::NotFound => (MigrationState::NotChecked, "noAdmissibleCounterpart"),
+                _ => (MigrationState::NotChecked, "counterpartUnavailable"),
+            },
+        };
+        checks.push(MigrationCheck {
+            direction,
+            counterpart,
+            state: state_value,
+            reason,
+            counterpart_resolution: Some(Box::new(resolution.clone())),
+        });
+    }
+    checks
 }

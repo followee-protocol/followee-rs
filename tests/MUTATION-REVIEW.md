@@ -390,3 +390,192 @@ Combined Milestone 4 evidence: **every mutant in changed production
 modules is caught except the seven accepted survivors and the one
 documented unreachable-defensive store arm**; no timeout was recorded in
 any sweep.
+
+## Milestone 5 gate (WebFinger, handle authority, migration presentation)
+
+Scoped sweeps over every changed production module —
+`src/webfinger/mod.rs`, `src/webfinger/jrd.rs`,
+`src/webfinger/authority.rs`, `src/resolver.rs`, `src/relay/client.rs`,
+`src/cli/handle.rs`, `src/cli/network.rs`, `src/cli/mod.rs` — with
+`cargo mutants --jobs 8 -o mutants.m5` (the Milestone 4 `mutants.out`
+evidence is left untouched).
+
+Sweep 1 (initial Milestone 5 code): **516 mutants: 420 caught, 37 missed,
+57 unviable, 2 timeouts**. Review classified every survivor; genuine gaps
+were closed with killer tests:
+
+- **two hang-capable shell tests** were the root cause of both timeouts:
+  `handle serve` guard mutants (`development_mode -> false`; the
+  case-variant DID comparison `!=` → `==`) let a process the test expected
+  to exit keep serving, and `Command::output()` waited forever. The tests
+  now use a bounded watchdog (`run_expecting_exit`) that kills a
+  still-running process and fails the assertion, so both mutants are
+  caught cleanly instead of hanging the suite;
+- `Handle` `Display` (protocol-visible in every CLI `handle` field) is
+  pinned by an exact-form unit test;
+- a moderately large (8 KiB) valid JRD must resolve, pinning
+  `MAX_JRD_RESPONSE_BYTES` against silent shrinkage;
+- the authority configuration byte bound is pinned at its exact boundary
+  (a valid configuration of exactly `MAX_CONFIG_BYTES` loads; one byte
+  more is `TooLarge`), and a valid record of exactly 16 KiB is accepted
+  by the record-file loader;
+- lowercase percent-escape hex (`%3a`) decoding is pinned;
+- the unused `HandleAuthority::resource_for_local` convenience helper was
+  removed instead of tested (dead code, two survivors);
+- CLI handler behaviour: `--no-bootstrap` suppresses fetches, migration
+  claims from a bootstrap winner render as deferred `notChecked` rows,
+  `authorityState` names render exactly, a near-cap (≥ 14 KiB) bootstrap
+  record passes the handle-command budget, `--deadline-ms` drives the
+  shared operation deadline, and supplying both `--record` and `--relay`
+  is a usage error.
+
+### Accepted surviving mutants (Milestone 5)
+
+| Mutant | Explanation |
+| --- | --- |
+| `src/webfinger/mod.rs` `canonical_domain` guard mutants (eleven: the pre-IDNA `is_empty`/length gate and the post-IDNA re-check conditions) | Deliberate defence-in-depth redundancy, documented at the function: `idna::domain_to_ascii_strict` (STD3 deny list, hyphen checks, `DnsLength::Verify`) already rejects every input the explicit re-checks reject — empty input, empty/oversized labels, >253 octets, non-LDH bytes, leading/trailing hyphens — and its output is lowercase ASCII by construction, so each mutated guard is unreachable or a no-op given the library invariants pinned by `sec_10_1_invalid_domains_are_rejected`. The re-checks exist precisely so conformance does not silently depend on those library internals; removing them to satisfy the mutation score would invert the design intent. The pre-gate length boundary (`> MAX_URI_BYTES`) is a bounded-work gate with the same both-paths-reject property as the accepted `did.rs` length-gate mutants (Milestone 1). |
+| `src/webfinger/jrd.rs` `parse_string` run-flush `>` → `>=` | Equivalent: at `pos == start` the mutant appends an empty, valid UTF-8 run — a no-op producing identical output for every input. |
+| `src/webfinger/authority.rs` `AuthorityConfig::load` size-check `==` mutants (config metadata/read pair, record pre-check) | Redundant-pair equivalents: the metadata gate and the post-read gate share one threshold, so weakening either to `==` routes an oversized file to the other, which rejects with the same `TooLarge`; the record pre-check weakened to `==` routes an oversized record to the production verifier's own 16 KiB step-1 check, which rejects with the same `RecordTooLarge` classification. The reachable `>=` boundary mutants at all three sites are killed by the new exact-boundary tests. |
+| `src/webfinger/authority.rs` `percent_decode` `(hi << 4) \| lo` → `^` | Equivalent: `hi << 4` has zero low bits, so OR and XOR agree (same category as the accepted Milestone 1 CBOR-writer head mutants). |
+| `src/webfinger/mod.rs` `Debug for WebFingerClient::fmt`, `src/relay/client.rs` `Debug for RelayClient::fmt` | Diagnostic formatting only (`finish_non_exhaustive` output); no protocol value flows through `Debug`. Same category as the accepted Milestone 4 `RelayClient` `Debug` mutant. |
+| `src/cli/network.rs` command-budget head-room constants (`2 * 1024 * 1024` first `*` in `relay_resolve`; `byte_limit * max_pages` mutants in `relay_sync`) | Already-reviewed Milestone 4 accepted survivors, unchanged by this milestone: every response these commands can accept is independently bounded first by the client's per-request caps, so the mutated head-room remains above every reachable size within protocol bounds. |
+
+Any Milestone 5 mutant not listed above and not caught in the
+confirmation sweep is a review finding, not an accepted survivor. The
+confirmation sweep result is recorded below.
+
+### Confirmation sweep (Milestone 5)
+
+Confirmation sweep over the same eight modules after the killer tests and
+watchdog fixes: **513 mutants: 435 caught, 15 missed, 57 unviable,
+6 timeouts** (three mutants fewer than sweep 1 because the dead
+`resource_for_local` helper was removed rather than tested).
+
+The 15 missed are exactly the accepted set above: the six surviving
+`canonical_domain` defence-in-depth guards (the pre-IDNA `||` gate and the
+post-IDNA label re-checks at `src/webfinger/mod.rs` lines 113–127 — the
+other five sweep-1 guard survivors are now caught by the added boundary
+tests), the `parse_string` empty-run `>=` equivalence, the
+already-reviewed Milestone 4 command-budget head-room constants in
+`src/cli/network.rs` (`relay_publish`, `relay_resolve`, `relay_changes`,
+`relay_sync`), the Milestone 4-accepted `RelayClient` `Debug` mutant, and
+two genuine findings killed after this sweep (see the final verification
+below): the `parse_hex4` uppercase `A–F` escape arm, and the
+`handle_resolve` sticky-transition comparison (`==` → `!=`), which could
+have fabricated sticky revocation in the state file for a Root bootstrap
+winner and is now pinned in both directions
+(`handle_events_never_mutate_the_state_file_identity` asserts the seeded
+state stays `root`;
+`handle_resolve_persists_a_learned_root_revoked_transition` asserts a
+real transition persists).
+
+The 6 timeouts divide into two categories, none a silent survivor:
+
+- `src/cli/mod.rs` `relay_serve -> Ok(None)` and the `relay_serve`
+  development-mode `delete !`: both disable or misreport the Milestone 3
+  `relay serve` process wholesale, and the suite cannot pass under them —
+  the three-relay demonstration script waits for relay startup that never
+  happens (or shell startup assertions fail), so the run is detected by
+  failure to complete. The mutated behaviour itself is pinned by the
+  Milestone 3 `relay_serve_shell` startup-contract tests; the timeout is
+  a property of the reviewed demonstration script's readiness wait, which
+  this milestone does not modify.
+- `WebFingerClient` `Debug` (accepted diagnostic-formatting category),
+  the `AuthorityConfig::load` record-size `==`/`>=` pre-check mutants,
+  and the `percent_decode` disjoint-bit `|` → `^` (both argued equivalent
+  above): equivalent mutants run the entire suite to completion, and
+  under eight parallel jobs the full-suite runtime crossed the
+  auto-timeout. Sweep 1 recorded the same mutants as ordinary survivors,
+  consistent with the equivalence argument rather than any hang. The
+  reachable record-size boundary (`>=` at exactly 16 KiB) is killed by
+  `sec_15_1_record_file_at_exactly_the_envelope_cap_loads` in the final
+  verification.
+
+### Final verification (Milestone 5)
+
+Targeted re-run over the two files whose kills landed after the
+confirmation sweep (`src/cli/handle.rs`, `src/webfinger/jrd.rs`):
+**106 mutants: 97 caught, 1 missed, 8 unviable, 0 timeouts**. The one
+survivor is exactly the accepted `parse_string` empty-run `>=`
+equivalence; the uppercase `A–F` escape arm and the `handle_resolve`
+sticky-transition comparison are both caught. The other six modules were
+unchanged after the confirmation sweep, whose results for them stand.
+
+Combined Milestone 5 evidence: **every mutant in changed production
+modules is caught except the documented accepted survivors** — six
+`canonical_domain` defence-in-depth guards, one `parse_string` empty-run
+equivalence, the redundant-pair size-check `==` mutants and the
+disjoint-bit `|`→`^` in the authority loader, two diagnostic `Debug`
+impls, and the already-reviewed Milestone 4 command-budget head-room
+constants — plus the two `relay_serve` process-disabling mutants detected
+by suite failure-to-complete, whose behaviour is pinned by the
+Milestone 3 shell tests.
+
+## Milestone 5 correction pass (specification v0.9.1 and Railway packaging)
+
+The v0.9.1 re-pin changed three production modules: `src/resolver.rs`
+(the section 14.2 migration classifier: a completed check with a stale
+claimant or counterpart is now exactly *Checked but unverified* with
+`claimantStale`/`counterpartStale`, staleness never yields *Not
+checked*, and the counterpart is resolved even for a stale claimant) and
+`src/cli/mod.rs` + `src/cli/handle.rs` (the `relay serve`/`handle serve`
+shutdown listener is now registered before the startup object is
+written, closing a race in which a SIGTERM arriving immediately after
+startup could hit the default disposition instead of the clean shutdown
+path — surfaced as a shell-test flake under coverage instrumentation).
+The Railway packaging introduces no mutable Rust production code (the
+container entrypoint is a shell script exercised end to end by
+`tests/handle_railway_packaging.rs` and by a full podman image build and
+run).
+
+Fresh scoped sweeps over exactly those modules, with the retained
+Milestone 5 evidence standing for every unchanged module:
+
+- `src/resolver.rs`: **67 mutants: 60 caught, 0 missed, 7 unviable,
+  0 timeouts** (`mutants.m51/`);
+- `src/cli/mod.rs` + `src/cli/handle.rs`: **59 mutants: 55 caught,
+  0 missed, 4 unviable, 0 timeouts** (`mutants.m51.cli/`).
+
+No survivor exists in any production module changed by the correction
+pass; no new accepted-survivor entry is required. The v0.9.1
+classification itself is pinned by
+`migration_states::sec_14_2_stale_claimant_is_checked_but_unverified`,
+`sec_14_2_stale_counterpart_is_checked_but_unverified_even_when_reciprocal`,
+and `sec_14_2_stale_and_non_reciprocal_claims_stay_checked_but_unverified`,
+each asserting the state, the diagnostic reason, suppressed
+presentation, and byte-identical durable identity and sticky state.
+
+## Milestone 5 deployment-evidence pass (digest pinning and consistency gate)
+
+This pass changed three production modules: `src/webfinger/authority.rs`
+(the predeployment `deployment_consistency` report), `src/cli/mod.rs`
+(the `--check` flag and `deploymentInconsistent` error), and
+`src/cli/handle.rs` (the check handler). Scoped sweeps:
+
+- combined sweep over all three (`mutants.m52/`, run concurrently with
+  the container build): **129 mutants: 114 caught, 1 missed, 9 unviable,
+  5 timeouts**;
+- clean re-verification of `src/webfinger/authority.rs` after review
+  (`mutants.m52.authority.final/`): **69 mutants: 63 caught, 1 missed,
+  5 unviable, 0 timeouts**.
+
+Review findings, all closed:
+
+- the config-size boundary test was self-referential (it padded to the
+  mutated constant), letting `MAX_CONFIG_BYTES` `256 * 1024` → `+`
+  survive — killed by asserting the absolute value `262_144`;
+- the exact-16-KiB record test exercised only `from_json`, leaving the
+  file-path size pre-check in `AuthorityConfig::load` unobserved
+  (`>` → `==`/`>=` at the record read) — killed by loading the maximal
+  record through a real config file and `AuthorityConfig::load`;
+- the two co-loaded-run timeouts at that same site were `relay_properties`
+  proptest runtime variance (its randomized cases run near the 60-second
+  mark under heavy parallel load), not mutant behaviour: the clean
+  re-verification has zero timeouts;
+- the `src/cli/mod.rs` `relay_serve` process-disabling timeout pair is
+  the documented Milestone 5 category (three-relay demonstration
+  readiness wait), unchanged.
+
+The one final survivor is the already-accepted `percent_decode`
+`(hi << 4) | lo` → `^` disjoint-bit equivalence. No other survivor
+exists in any module changed by this pass.

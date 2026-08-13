@@ -2,8 +2,9 @@
 
 Ambiguities identified in the normative specification
 (`followee-protocol/followee`), tracked against the pinned commit in
-IMPLEMENTATION.md section 2 (currently
-`13777db64e1eca63796a8f485cf721307d2c3869`, specification v0.9). Per
+IMPLEMENTATION.md section 2 (currently repository commit
+`fd8f6a8b2311677be38bd22a0a3265539dca2158`, specification revision
+`5bea128f2800cc3fd443fa7440f8c247b9d4a9c8`, draft v0.9.1). Per
 IMPLEMENTATION.md section 2, questions are resolved in the protocol repository
 — never silently in this implementation — and no milestone may pass while an
 open question affects code delivered by that milestone. Resolving a question
@@ -11,8 +12,9 @@ that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
 **All recorded questions are resolved**, and every resolution remains in
-force in specification v0.9 at the pinned commit. Each resolved entry cites
-the amending version and records the test obligation the resolution creates.
+force in specification v0.9.1 at the pinned commit. Each resolved entry
+cites the amending version and records the test obligation the resolution
+creates.
 
 ---
 
@@ -515,3 +517,68 @@ depends on this choice.
 **Test obligation (Milestone 4):**
 `sync_receiver::sec_12_7_peer_identity_is_the_relay_id_not_the_endpoint`,
 `sync_receiver::sec_12_7_endpoint_change_keeps_the_same_peer_cursor`.
+
+## SQ-20 — Migration state for a reciprocating but stale counterpart record
+
+**Status:** resolved (spec v0.9.1, commit `5bea128`) · **Affected:** Milestone 5 client (presentation-state classification) · **Spec:** sections 5.5, 7.4, 14.2, 14.4, 20.3
+
+Smallest concrete example: A's winning **fresh** record carries
+`successor = B`; B's winning record carries `predecessor = A` and passes
+every verification and admission rule, but its `validUntil_ms` has passed,
+so B's record is admissible yet **stale**. Section 7.4 requires *both*
+winning records to be fresh, and section 5.5 says a stale record must not
+establish a verified migration link, so the relation is certainly not
+`Verified`. But neither remaining section 14.2 state matches its
+definition verbatim:
+
+- **Checked but unverified** is defined as "a winning fresh counterpart
+  was obtained, but it did not reciprocate" — here no *fresh* counterpart
+  was obtained, and the counterpart *did* reciprocate;
+- **Not checked** is defined as "the reciprocal test did not complete
+  because it was deferred, exhausted its shared budget, timed out,
+  encountered unavailability, or found no admissible counterpart" — here
+  the test completed, and the stale counterpart *is* admissible under the
+  section 2 definition (staleness is freshness metadata, not
+  inadmissibility).
+
+Section 14.4 lists staleness alongside non-reciprocity as a way a link
+"ceases to verify", which reads like *Checked but unverified*, but also
+alongside unavailability, which maps to *Not checked*; it assigns no
+state.
+
+Resolved by amendment. Specification v0.9.1 rewrites the section 14.2
+state table and adds normative text: **Verified** requires both winning
+admissible records, both fresh, and reciprocity; a reciprocal test that
+completes against both winning admissible records but finds either record
+stale — or finds them non-reciprocal — records **Checked but
+unverified**, regardless of whether the migration fields reciprocate;
+**Not checked** is reserved for a check that did not complete (deferred,
+shared-budget exhaustion, timeout, unavailability, or no admissible
+counterpart). A client MUST NOT record Not checked merely because the
+claiming record or counterpart is stale. Diagnostics SHOULD distinguish
+`claimantStale`, `counterpartStale`, and `nonReciprocal`; these names are
+local diagnostics, not wire error codes. Section 20.3 adds the exact
+stale-classification test obligation, including the still-reciprocating
+case, and section 14.4 restates the decay consequences in the same terms.
+
+The original implementation had recorded the MUST-safe provisional
+reading (*Not checked*, `counterpartStale`, with a stale claimant
+deferred before any network work) precisely because the v0.9 text left
+this corner unassigned. That interpretation is superseded by the
+normative clarification: the production classifier in
+`src/resolver.rs::check_migration` now resolves the counterpart even when
+the claimant is stale (staleness alone must never yield *Not checked*)
+and records *Checked but unverified* with the distinguishing diagnostic.
+Neither unsuccessful state permits migration-oriented presentation,
+automatic re-following, cached-identity replacement, followed-DID
+mutation, or sticky-authority mutation, and no wire behaviour changed.
+
+**Test obligation (Milestone 5, v0.9.1):**
+`migration_states::sec_14_2_stale_claimant_is_checked_but_unverified`,
+`sec_14_2_stale_counterpart_is_checked_but_unverified_even_when_reciprocal`,
+`sec_14_2_stale_and_non_reciprocal_claims_stay_checked_but_unverified`,
+alongside the retained `sec_14_2_one_way_claim_is_checked_but_unverified`
+(`nonReciprocal`) and the incomplete-check cases
+(`sec_14_2_absent_counterpart_is_not_checked_not_a_negative_result`,
+`sec_14_2_unavailable_counterpart_is_not_checked`,
+`sec_14_1_migration_hop_budget_is_enforced`).

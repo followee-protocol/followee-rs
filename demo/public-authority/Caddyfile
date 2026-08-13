@@ -1,0 +1,7 @@
+# TLS-terminating reverse proxy for the Followee demonstration handle
+# authority. Caddy obtains and renews certificates automatically for the
+# provider-assigned domain. Replace the domain, keep the loopback target
+# in sync with the systemd unit / run command.
+your-domain.example {
+	reverse_proxy 127.0.0.1:8130
+}

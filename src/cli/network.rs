@@ -22,7 +22,8 @@ use crate::relay::client::{
 use crate::relay::sync::SyncOptions;
 use crate::relay::wire::ReceivedChangesResponse;
 use crate::resolver::{
-    ClientState, DiagEvent, ResolveOutcome, ResolverBudgets, ResolverConfig, resolve_did,
+    ClientState, DiagEvent, MigrationCheck, MigrationState, OperationScope, ResolveOutcome,
+    ResolverBudgets, ResolverConfig, check_migration, resolve_did, resolve_did_in_scope,
 };
 use crate::timestamp::{Freshness, TimeStatus, freshness, time_status};
 use crate::verify::verify_record_for_target;
@@ -288,7 +289,7 @@ pub(super) fn relay_sync(args: &RelaySyncArgs, rng: &dyn RandomSource) -> Result
 /// Loads client state from an optional JSON file. Cached envelopes are
 /// re-verified through the production core before restoration; entries that
 /// fail are silently dropped (the file is local input, not evidence).
-fn load_state(path: Option<&Path>) -> Result<ClientState, CliError> {
+pub(super) fn load_state(path: Option<&Path>) -> Result<ClientState, CliError> {
     let mut state = ClientState::new();
     let Some(path) = path else {
         return Ok(state);
@@ -326,7 +327,7 @@ fn load_state(path: Option<&Path>) -> Result<ClientState, CliError> {
 }
 
 /// Serializes client state to its JSON file form.
-fn state_to_json(state: &ClientState) -> Value {
+pub(super) fn state_to_json(state: &ClientState) -> Value {
     let mut dids = serde_json::Map::new();
     for (did, entry) in state.iter() {
         let mut object = serde_json::Map::new();
@@ -355,7 +356,7 @@ fn state_to_json(state: &ClientState) -> Value {
     json!({ "version": 1, "dids": dids })
 }
 
-fn diag_json(event: &DiagEvent) -> Value {
+pub(super) fn diag_json(event: &DiagEvent) -> Value {
     match event {
         DiagEvent::VerifiedCandidate => json!({ "event": "verifiedCandidate" }),
         DiagEvent::RejectedCandidate(error) => {
@@ -373,6 +374,51 @@ fn diag_json(event: &DiagEvent) -> Value {
         DiagEvent::CycleRefused => json!({ "event": "cycleRefused" }),
         DiagEvent::BudgetStopped(which) => json!({ "event": "budgetStopped", "budget": which }),
     }
+}
+
+/// Renders one migration check (specification sections 14.2 and 14.3):
+/// only the Verified state may drive migration-oriented presentation, and
+/// even then nothing is re-followed automatically.
+pub(super) fn migration_check_json(check: &MigrationCheck) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert(
+        "direction".to_owned(),
+        Value::String(check.direction.name().to_owned()),
+    );
+    object.insert(
+        "counterpart".to_owned(),
+        Value::String(check.counterpart.clone()),
+    );
+    object.insert(
+        "state".to_owned(),
+        Value::String(check.state.name().to_owned()),
+    );
+    object.insert("reason".to_owned(), Value::String(check.reason.to_owned()));
+    // Section 14.3: anything short of Verified is suppressed, never shown
+    // as "formerly" / provenance / succession.
+    object.insert(
+        "presentable".to_owned(),
+        Value::Bool(check.state == MigrationState::Verified),
+    );
+    if let Some(resolution) = &check.counterpart_resolution {
+        let outcome = match &resolution.outcome {
+            ResolveOutcome::Found(found) => json!({
+                "outcome": "found",
+                "stale": found.stale,
+            }),
+            ResolveOutcome::NotFound => json!({ "outcome": "notFound" }),
+            ResolveOutcome::TemporarilyUnavailable => {
+                json!({ "outcome": "temporarilyUnavailable" })
+            }
+        };
+        let mut summary = outcome.as_object().cloned().unwrap_or_default();
+        summary.insert(
+            "relaysConsulted".to_owned(),
+            Value::Number(resolution.relays_consulted.into()),
+        );
+        object.insert("counterpartResolution".to_owned(), Value::Object(summary));
+    }
+    Value::Object(object)
 }
 
 /// `followee resolve`: the production multi-relay resolver. This handler
@@ -400,8 +446,50 @@ pub(super) fn resolve_multi(args: &ResolveArgs, clock: &dyn Clock) -> Result<Val
             ..ResolverBudgets::default()
         },
     };
-    let resolution = resolve_did(&args.did, &config, &client, effective_clock, &mut state)
-        .map_err(CliError::Verify)?;
+    // One shared operation scope covers the resolution and any migration
+    // checks: one deadline, byte, request, distinct-relay, and hop budget
+    // (specification section 14.1). A clock failure surfaces through the
+    // ordinary resolve path as temporarilyUnavailable.
+    let (resolution, migration) = match effective_clock.now_ms() {
+        Err(_) => (
+            resolve_did(&args.did, &config, &client, effective_clock, &mut state)
+                .map_err(CliError::Verify)?,
+            None,
+        ),
+        Ok(now_ms) => {
+            let mut scope = OperationScope::new(&config.budgets, now_ms);
+            let resolution = resolve_did_in_scope(
+                &args.did,
+                &config,
+                &client,
+                effective_clock,
+                &mut state,
+                &mut scope,
+            )
+            .map_err(CliError::Verify)?;
+            let migration = if args.check_migration {
+                match &resolution.outcome {
+                    ResolveOutcome::Found(found) => {
+                        let target = crate::did::FolloweeDid::parse(&args.did)
+                            .map_err(|e| CliError::Verify(e.into()))?;
+                        Some(check_migration(
+                            found,
+                            &target,
+                            &config,
+                            &client,
+                            effective_clock,
+                            &mut state,
+                            &mut scope,
+                        ))
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            (resolution, migration)
+        }
+    };
 
     if let Some(path) = &args.state {
         let text = format!("{}\n", state_to_json(&state));
@@ -450,6 +538,12 @@ pub(super) fn resolve_multi(args: &ResolveArgs, clock: &dyn Clock) -> Result<Val
                     "recordHex": hex::encode(found.record.envelope_bytes()),
                 }),
             );
+            if let Some(checks) = migration {
+                object.insert(
+                    "migration".to_owned(),
+                    Value::Array(checks.iter().map(migration_check_json).collect()),
+                );
+            }
             Ok(Value::Object(object))
         }
         ResolveOutcome::NotFound => Err(CliError::ResolutionFailed {

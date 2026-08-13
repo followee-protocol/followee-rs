@@ -3,19 +3,23 @@
 //! Non-normative Rust implementation of the Followee DID method and relay
 //! protocol.
 //!
-//! **Status: Milestone 4 (resolver and relay network) in progress.** This
-//! crate implements the Followee v1 identifier, deterministic CBOR, COSE,
-//! strict Ed25519 verification, record schemas, signing, and ordering
-//! rules; the [`cli`] module backing the `followee` binary (identity
-//! creation, record signing and revocation, verification, inspection,
-//! deterministic selection, JSON authoring, safe local test-key storage,
-//! and the network commands); the single-relay protocol core (the
-//! [`store`] contract with memory and SQLite backends and the [`relay`]
-//! admission, resolve, changes, and HTTP/CBOR surfaces); the strict
-//! bounded relay client ([`relay::client`]); the current-state
-//! synchronization receiver with persisted peer cursors ([`relay::sync`]);
-//! and the multi-relay [`resolver`] with shared traversal budgets. No
-//! WebFinger or handle-discovery code exists yet.
+//! **Status: Milestone 5 (handles and public demonstration) in
+//! progress.** This crate implements the Followee v1 identifier,
+//! deterministic CBOR, COSE, strict Ed25519 verification, record schemas,
+//! signing, and ordering rules; the [`cli`] module backing the `followee`
+//! binary (identity creation, record signing and revocation, verification,
+//! inspection, deterministic selection, JSON authoring, safe local
+//! test-key storage, the network commands, and the handle commands); the
+//! single-relay protocol core (the [`store`] contract with memory and
+//! SQLite backends and the [`relay`] admission, resolve, changes, and
+//! HTTP/CBOR surfaces); the strict bounded relay client
+//! ([`relay::client`]); the current-state synchronization receiver with
+//! persisted peer cursors ([`relay::sync`]); the multi-relay [`resolver`]
+//! with shared traversal budgets and the three migration presentation
+//! states; and WebFinger handle discovery, inverse verification, bootstrap,
+//! and the minimal demonstration handle authority ([`webfinger`]). The
+//! public HTTPS deployment of the demonstration authority is prepared but
+//! performed separately.
 //!
 //! The normative authority for protocol behaviour is the pinned Followee
 //! specification in the `followee-protocol/followee` repository, not this
@@ -44,6 +48,7 @@ pub mod resolver;
 pub mod store;
 pub mod timestamp;
 pub mod verify;
+pub mod webfinger;
 
 pub use cose::sig_structure;
 

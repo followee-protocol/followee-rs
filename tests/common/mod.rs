@@ -931,3 +931,217 @@ pub fn synthetic_record_at(
         root,
     )
 }
+
+// ---------------------------------------------------------------------------
+// Milestone 5: WebFinger and handle-authority helpers.
+// ---------------------------------------------------------------------------
+
+use followee::contact::Migration;
+
+/// A 200 `application/jrd+json` transport response.
+pub fn jrd_ok(body: &str) -> TransportResponse {
+    TransportResponse {
+        status: 200,
+        content_type: Some("application/jrd+json".to_owned()),
+        location: None,
+        body: body.as_bytes().to_vec(),
+    }
+}
+
+/// A 200 `application/cose` transport response carrying record bytes.
+pub fn cose_ok(body: Vec<u8>) -> TransportResponse {
+    TransportResponse {
+        status: 200,
+        content_type: Some("application/cose".to_owned()),
+        location: None,
+        body,
+    }
+}
+
+/// An empty-body response with a status (404, 500, ...).
+pub fn status_only(status: u16) -> TransportResponse {
+    TransportResponse {
+        status,
+        content_type: None,
+        location: None,
+        body: Vec::new(),
+    }
+}
+
+/// A redirect response to `location`.
+pub fn redirect_to(status: u16, location: &str) -> TransportResponse {
+    TransportResponse {
+        status,
+        content_type: None,
+        location: Some(location.to_owned()),
+        body: Vec::new(),
+    }
+}
+
+/// The WebFinger lookup URL for `resource` under `base` (percent-encoded
+/// independently of the code under test).
+pub fn webfinger_url(base: &str, resource: &str) -> String {
+    let mut encoded = String::new();
+    for byte in resource.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    format!("{base}.well-known/webfinger?resource={encoded}")
+}
+
+/// A minimal valid JRD mapping `resource` to `did`.
+pub fn jrd_body(resource: &str, did: &str) -> String {
+    format!(
+        r#"{{"subject":"{resource}","links":[{{"rel":"https://w3id.org/followee/rel/did","href":"{did}"}}]}}"#
+    )
+}
+
+/// A JRD with a Followee DID link plus a bootstrap record link.
+pub fn jrd_body_with_record(resource: &str, did: &str, record_url: &str) -> String {
+    format!(
+        r#"{{"subject":"{resource}","links":[{{"rel":"https://w3id.org/followee/rel/did","href":"{did}"}},{{"rel":"https://w3id.org/followee/rel/record","type":"application/cose","href":"{record_url}"}}]}}"#
+    )
+}
+
+/// Signs a complete record for Alice through the production authoring path
+/// with the published Appendix B root seed, using the supplied contact.
+pub fn alice_record_with_contact(
+    timestamp_ms: u64,
+    valid_until_ms: Option<u64>,
+    contact: ContactDocument,
+) -> Vec<u8> {
+    let body = RecordBody {
+        id: alice_did(),
+        timestamp_ms,
+        authority: Authority::Root,
+        descriptor: alice_descriptor(),
+        revocation_key: None,
+        valid_until_ms,
+        contact,
+        extensions: Default::default(),
+    };
+    followee::record::sign_record(&body, &root_seed()).expect("signs")
+}
+
+/// Signs a complete record for Bob through the production authoring path.
+pub fn bob_record_with_contact(
+    timestamp_ms: u64,
+    valid_until_ms: Option<u64>,
+    contact: ContactDocument,
+) -> Vec<u8> {
+    let body = RecordBody {
+        id: bob_did(),
+        timestamp_ms,
+        authority: Authority::Root,
+        descriptor: bob_descriptor(),
+        revocation_key: None,
+        valid_until_ms,
+        contact,
+        extensions: Default::default(),
+    };
+    followee::record::sign_record(&body, &bob_root_seed()).expect("signs")
+}
+
+/// A contact claiming `acct_uris` in `alsoKnownAs`.
+pub fn contact_claiming(acct_uris: &[&str]) -> ContactDocument {
+    ContactDocument {
+        also_known_as: acct_uris.iter().map(|s| (*s).to_owned()).collect(),
+        ..ContactDocument::default()
+    }
+}
+
+/// A contact carrying migration claims.
+pub fn contact_with_migration(
+    predecessor: Option<&FolloweeDid>,
+    successor: Option<&FolloweeDid>,
+) -> ContactDocument {
+    ContactDocument {
+        migration: Some(Migration {
+            predecessor: predecessor.cloned(),
+            successor: successor.cloned(),
+        }),
+        ..ContactDocument::default()
+    }
+}
+
+/// Alice's RootRevoked record signed by the published revocation seed.
+pub fn alice_revoked_record(timestamp_ms: u64) -> Vec<u8> {
+    let body = RecordBody {
+        id: alice_did(),
+        timestamp_ms,
+        authority: Authority::RootRevoked,
+        descriptor: alice_descriptor(),
+        revocation_key: Some(fx32("revocation_public_key")),
+        valid_until_ms: None,
+        contact: ContactDocument::default(),
+        extensions: Default::default(),
+    };
+    followee::record::sign_record(&body, &revocation_seed()).expect("signs")
+}
+
+/// Starts the demonstration handle authority on a real loopback socket
+/// from configuration JSON, returning the bound address. Record files are
+/// supplied by name through `records`. The server runs until process
+/// exit (test-scoped).
+pub fn start_authority(
+    config_json: &str,
+    records: &[(&str, Vec<u8>)],
+) -> (
+    std::net::SocketAddr,
+    std::sync::Arc<followee::webfinger::authority::HandleAuthority>,
+) {
+    let record_map: std::collections::HashMap<String, Vec<u8>> = records
+        .iter()
+        .map(|(name, bytes)| ((*name).to_owned(), bytes.clone()))
+        .collect();
+    let config = followee::webfinger::authority::AuthorityConfig::from_json(
+        config_json.as_bytes(),
+        |path| {
+            record_map.get(path).cloned().ok_or_else(|| {
+                followee::webfinger::authority::ConfigError::Schema(format!(
+                    "unknown test record {path:?}"
+                ))
+            })
+        },
+    )
+    .expect("config validates");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (authority_tx, authority_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        rt.block_on(async move {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let authority = std::sync::Arc::new(
+                followee::webfinger::authority::HandleAuthority::new(
+                    config,
+                    format!("http://{addr}/"),
+                )
+                .expect("authority"),
+            );
+            tx.send(addr).expect("send addr");
+            authority_tx
+                .send(std::sync::Arc::clone(&authority))
+                .expect("send authority");
+            followee::webfinger::authority::serve_with_shutdown(
+                authority,
+                listener,
+                std::future::pending(),
+            )
+            .await
+            .expect("serve");
+        });
+    });
+    (
+        rx.recv().expect("server address"),
+        authority_rx.recv().expect("authority handle"),
+    )
+}
