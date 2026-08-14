@@ -18,20 +18,23 @@ Implementation work targets:
 
 - repository: <https://github.com/followee-protocol/followee>
 - specification: `Followee-Specification.md`
-- pinned repository commit: `fd8f6a8b2311677be38bd22a0a3265539dca2158`
-- specification revision commit: `5bea128f2800cc3fd443fa7440f8c247b9d4a9c8`
-- specification SHA-256: `1c1a20c639aaf90b1bfc54b5e9ea72c49f680566ba9b12ad10615412ece3cd71`
-- specification draft: `v0.9.1`
+- pinned repository commit: `ac5a794f2fdadc13cddf5367fa3e047617e3e950`
+- reviewed protocol-document tag: `v0.9.2-reviewed`
+- specification revision commit: `f1d19fec0dba455d90d473bfad625d1c288e0c15`
+- specification SHA-256: `47af5fbf0c4505386b4e04d948ef89d013f878ea820fb02522817661d633633a`
+- specification draft: `v0.9.2`
 - whitepaper: `Followee-Whitepaper.md`
-- whitepaper revision commit: `fd8f6a8b2311677be38bd22a0a3265539dca2158`
-- whitepaper SHA-256: `1d880f36a26fa1411f454443dabd7f31f8b4bbfc30f850eb74a6d3aa304e8dc3`
-- whitepaper draft: `v0.10`
+- whitepaper revision commit: `ac5a794f2fdadc13cddf5367fa3e047617e3e950`
+- whitepaper SHA-256: `dc106ee10741d5a8b157447b0f256eb61435ea036a4616e862387658e60c8387`
+- whitepaper draft: `v0.10.1`
 - protocol version: `1`
 - DID method: `did:flw`
 
 The whitepaper is design rationale, not a wire-format authority.
 
 The implementation MUST NOT silently invent behaviour when the specification is ambiguous. Record the ambiguity in `SPEC-QUESTIONS.md`, write the smallest failing or pending test that demonstrates it, and resolve it in the protocol repository before depending on an interpretation.
+
+`SPEC-QUESTIONS.md` must begin with a compact resolution index covering every named question category in the file. For each category, the index records the relevant SQ entries, affected surface, resolving specification revision and commit, present status, and the regression or conformance evidence that pins the resolution. The index is an audit aid rather than a substitute for the full question history, and must be updated whenever a category or resolution is added.
 
 No milestone may pass while `SPEC-QUESTIONS.md` contains an unresolved question that affects code in that milestone. If resolving a question amends the normative specification, update the pinned commit in this section, record the change in the implementation repository, and rerun the complete applicable conformance and differential suite. A previous green result against another commit is not inherited automatically. Evidence for a demonstrably unchanged, out-of-scope surface may be retained only when the amendment explicitly leaves that surface unchanged and this brief records the scope argument and immutable evidence revisions.
 
@@ -41,7 +44,9 @@ The v0.8.1 amendment is deliberately narrow. It clarifies that a well-formed, ba
 
 The v0.9 amendment is relay-only. It closes the concurrent-ingress cursor-overtaking hazard by requiring update-number assignment, state commitment and changes-feed visibility to form one observable order. Sections 3 through 8, every record and envelope byte, and Appendix B.2 through B.12 are unchanged. The reviewed v0.8.1 Rust core, clean-room model, 218-of-218 differential result and 53 confirmed fixtures therefore remain applicable evidence for that unchanged core; they are not rewritten or relabelled as newly derived v0.9 evidence. The bounded Rust relay maintenance pass is reviewed at `497d57c1b1fce53b1e4c89747ef454d6b3f9a7b5` (`milestone-3-v0.9-reviewed`): it audits the invariant against both production backends, moves expensive state-independent verification outside the relay write-critical section, and adds deterministic concurrency and controlled-fault evidence while preserving all prior Milestone 2 and 3 behaviour. The resolver and relay-network milestone is reviewed at `c74d59d20945e103e9b208413156922cd5be8a49` (`milestone-4-v0.9-reviewed`): it adds the bounded production HTTP/CBOR client, peer synchronization receiver with durable cursors, shared-budget multi-relay resolution, direct network CLI surfaces and the deterministic three-relay demonstration. A new clean-room core-model maintenance pass was not required solely for that amendment because the model's Sections 3-through-8 scope did not change. The reviewed relay work remains evidence at its v0.9 pin; subsequent work pins the current specification revision stated above.
 
-The v0.9.1 amendment resolves the Milestone 5 migration-state ambiguity recorded as SQ-20 without changing wire bytes, cryptography, record verification, ordering, relay ingress, cursor semantics or the Appendix B vectors. A reciprocal check that obtains both winning admissible records but finds either one stale is complete and therefore **Checked but unverified**; diagnostics may distinguish `claimantStale` from `counterpartStale`. **Not checked** is reserved for checks that did not complete because they were deferred, exhausted their shared budget, timed out, encountered unavailability or found no admissible counterpart. Neither state permits migration-oriented presentation or changes durable identity state. The existing core and v0.9 relay evidence remains applicable, but Milestone 5 must implement this classification through the production resolver and rerun its complete local gate against v0.9.1.
+The v0.9.1 amendment resolves the Milestone 5 migration-state ambiguity recorded as SQ-20 without changing wire bytes, cryptography, record verification, ordering, relay ingress, cursor semantics or the Appendix B vectors. A reciprocal check that obtains both winning admissible records but finds either one stale is complete and therefore **Checked but unverified**; diagnostics may distinguish `claimantStale` from `counterpartStale`. **Not checked** is reserved for checks that did not complete because they were deferred, exhausted their shared budget, timed out, encountered unavailability or found no admissible counterpart. Neither state permits migration-oriented presentation or changes durable identity state. The existing core and v0.9 relay evidence remained applicable, and the reviewed Milestone 5 resolver implements this classification through its production path.
+
+The v0.9.2 amendment resolves the publish-response field-presence ambiguity exposed by the first Rust–Motoko interoperability campaign. Status `0` forbids `errorCode`; status `1` permits it only as an accurate `losingRecord` or `duplicate` diagnostic; status `2` requires it and forbids those two no-change codes. Any other combination is malformed and the complete response is rejected. A conforming status-`2` publication rejection remains successful HTTP-layer protocol processing and SHOULD use HTTP `200`. Both status-`1` encodings observed in Campaign 1—with and without the permitted diagnostic—remain conforming and must remain visibly distinct in reports rather than being normalized. This is a normative relay-wrapper change, so specification Section 20.4 requires the complete conformance and interoperability campaign to be rerun against one pinned v0.9.2 bundle and participant set; a publish-only rerun is insufficient. Cryptography, record bytes, ordering, cursor visibility and every Appendix B vector remain unchanged, so the frozen v0.8.1 Python core-model evidence remains applicable to its unchanged Sections 3-through-8 scope and is not rewritten as v0.9.2 evidence.
 
 ## 3. Implementation status and naming
 
@@ -51,9 +56,9 @@ It is the first implementation but is not a privileged “reference truth.” Pu
 
 > A non-normative Rust implementation of the Followee DID method and relay protocol.
 
-The later `followee-icp` implementation is expected to be independently written in Motoko and to consume the same external conformance fixtures without sharing protocol implementation code.
+The independent Motoko implementation is maintained at <https://github.com/followee-protocol/followee-motoko>. Its first implementation was authored from the sealed v0.9.1 authoring subset and frozen at `3840d9adf07755d326d920f4711dafc4e08bcb40` (`motoko-v0.9.1-independent-freeze`) before coordinator expectations, Rust source or campaign results were revealed. That tag and its recorded challenge output remain immutable independence evidence; later corrections and transport work descend from it and do not rewrite or retag it.
 
-Reviewed Rust milestones 0 through 4 are complete through tag `milestone-4-v0.9-reviewed` at `c74d59d20945e103e9b208413156922cd5be8a49`. Milestone 5 must complete against specification v0.9.1, including the clarified stale-migration classification and the reproducible public demonstration described below.
+Reviewed Rust milestones 0 through 5 are complete through tag `milestone-5-v0.9.1-reviewed` at `8606a102bfb4f2bbfbc81e364bdf548c437bf123`; Milestone 4 remains preserved at `c74d59d20945e103e9b208413156922cd5be8a49` (`milestone-4-v0.9-reviewed`). The neutral v0.9.1 bundle is reviewed at `c90742eb763cda5bd3c6e7d20ab1799590da489b` (`v0.9.1-interop-bundle-reviewed`). Campaign 1 is preserved at `515f37d86a35937b3539bfafdd671291d6abb443` (`v0.9.1-interop-campaign-1`): its 76 expected-vector cases and 36 blind challenges had zero unexplained protocol disagreements, and its Rust-serving live exchange completed, but its Motoko-serving direction lacked the full HTTP/CBOR role surface. It therefore made no complete Section 20.4 interoperability claim. Milestone 6 is the active release gate and must complete the v0.9.2 work specified below without altering any of those historical tags or reports.
 
 ## 4. Scope
 
@@ -290,7 +295,7 @@ The creation command should permit the revocation key to be written directly to 
 
 The CLI may accept a friendly JSON Contact Document using field names rather than CBOR labels. This JSON is an implementation convenience and is not a Followee wire format.
 
-It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars introduced in specification v0.6 Section 7.3 and retained by v0.9.1; authoring and verification paths must apply the same grammar. Every URI-valued field MUST use the pinned v0.9.1 Section 7.2 `URI` production, including optional query and fragment components, rather than the fragment-excluding RFC 3986 `absolute-URI` production.
+It MUST map unambiguously to the normative Contact Document, reject unknown fields by default, enforce all limits before signing, and always create a complete document rather than a delta. Service `mediaType`, `language`, and `rel` values MUST use the fixed, registry-independent grammars introduced in specification v0.6 Section 7.3 and retained by v0.9.2; authoring and verification paths must apply the same grammar. Every URI-valued field MUST use the pinned v0.9.2 Section 7.2 `URI` production, including optional query and fragment components, rather than the fragment-excluding RFC 3986 `absolute-URI` production.
 
 ## 8. CLI surface
 
@@ -340,6 +345,8 @@ POST v1/changes
 ```
 
 It must use the exact media types, schemas, result alignment, status values, error codes, bounds and CORS behaviour in the specification.
+
+Publish-response encoding and decoding must enforce specification v0.9.2 as a status-dependent union, not merely accept the Appendix A CDDL shape. Status `0` forbids `errorCode`. Status `1` accepts either no code or exactly the accurate `losingRecord`/`duplicate` diagnostic; the Rust server may retain its deterministic no-code encoding. Status `2` requires a registered rejection code other than those two. The receiver rejects the complete response for every other combination, including every registered status-`1` code outside `losingRecord` and `duplicate`. A conforming status-`2` protocol rejection is carried in the normal HTTP `200` response body; it is not converted into a transport error.
 
 Before returning a stored Full result, the relay repeats the future-bound check against its current injected clock. A stored record that has become premature is not returned as Full or conflated with Absent: the relay returns a usable Ref or the per-DID `premature` Error result. This serving-time decision must not mutate the stored entry, change `lastUpdated`, or increment the relay-local update number.
 
@@ -421,13 +428,15 @@ The resolver must:
 - expose freshness and staleness; and
 - implement all three migration-check states without automatic re-following.
 
-Migration classification follows specification v0.9.1 exactly. **Verified** requires both winning admissible records, both fresh, and reciprocal. A completed check with either winning record stale or with failed reciprocity is **Checked but unverified**. **Not checked** means the reciprocal check did not complete. Tests must exercise stale claimant and stale counterpart cases separately, preserve the reason for diagnostics, suppress migration presentation in both cases, and prove that neither classification mutates the followed DID, cached identity record or sticky authority state.
+Migration classification follows specification v0.9.2 exactly, retaining the v0.9.1 clarification unchanged. **Verified** requires both winning admissible records, both fresh, and reciprocal. A completed check with either winning record stale or with failed reciprocity is **Checked but unverified**. **Not checked** means the reciprocal check did not complete. Tests must exercise stale claimant and stale counterpart cases separately, preserve the reason for diagnostics, suppress migration presentation in both cases, and prove that neither classification mutates the followed DID, cached identity record or sticky authority state.
 
 WebFinger support must verify the exact requested canonical `acct:` subject and require exactly one Followee DID relation. Handle claims in `alsoKnownAs` remain unverified until inverse lookup maps the exact handle back to the same DID. The demonstration handle authority must not assign ASCII-case variants under one domain to different DIDs; accepted variants are rejected or mapped as aliases to the same DID while exact-subject verification remains unchanged.
 
 The public WebFinger demonstration is deferred until the local resolver and relay tests pass. Its canonical reproducible deployment target is a container on Railway using the provider-assigned HTTPS domain, the platform-supplied `PORT`, and an explicitly configured public base URI. The image and start command must contain no private key or deployment credential; the demonstration authority publishes only reviewed public configuration and signed public record bytes. A purchased custom domain is not required.
 
 Retain a provider-neutral VPS deployment beside the Railway path: the tested authority binary behind Caddy or nginx for HTTPS termination, with a hardened systemd unit and exact operator probes. This alternative is useful for an operator who already controls a server, but it is not required for the vanilla reproducible acceptance path. The Milestone 5 authority is immutable and needs no database. For later relay deployment tests, the Railway documentation may additionally describe mounting a persistent volume at `/data` and placing the SQLite database there; that optional profile must not be conflated with the stateless handle authority.
+
+The reviewed Railway authority, the retained VPS profile and any ICP apex-canister deployment spike are alternative deployment targets, not cumulative release gates. Milestone 6 requires the complete reproducible build and loopback interoperability evidence in Section 13; it does not require a second public authority deployment or an ICP deployment unless one is separately chosen as a participant-hosting experiment. Such an experiment must be labelled optional and must not be used to paper over missing participant-owned HTTP/CBOR behaviour.
 
 ## 11. Test strategy
 
@@ -514,7 +523,7 @@ Appendix B does not by itself cover every security-bearing branch in Sections 5 
 - absence of any “last good Root” fallback; and
 - Section 8.5 behaviour after sticky state is deliberately discarded, distinguished from behaviour while it is retained.
 
-Specification v0.9.1 Section 20.1 retains the URI-profile cases introduced in v0.7, which:
+Specification v0.9.2 Section 20.1 retains the URI-profile cases introduced in v0.7, which:
 
 - accept scheme-bearing URIs with optional queries and fragments, including `https://example.com/profile?view=full#about` and `did:web:example.com#key-1`;
 - reject network-path, absolute-path, relative-path, query-only and fragment-only references;
@@ -580,7 +589,7 @@ The reviewed correction rejects Boolean CBOR keys masquerading as integer labels
 
 The v0.7 maintenance freeze independently applied the RFC 3986 `URI` production and exact CBOR label typing from the v0.7 specification, preserved the unchanged Appendix B positive bytes, and passed its complete 173-test suite before differential material was exposed. The reviewed v0.8 maintenance freeze independently derived the v0.7-to-v0.8 delta, reproduced Appendix B.9 and B.10, passed its complete 193-test suite, and includes a documentation-only post-maintenance correction whose parent is the implementation commit. Its tag peels to the reviewed correction commit and is the starting implementation revision for the v0.8.1 clean-room maintenance pass.
 
-The reviewed v0.8.1 maintenance freeze independently reproduced Appendix B.12 and preserved the model's independently derived record-level `schemaViolation` classification. The immutable freeze also preserved a narrower structural-validator interpretation that the first differential run exposed. The separate reviewed conformance correction at `a94e9a8a7bd2f9c2e0947715ec387b6c3967e4e6` moved schema admission out of deterministic-CBOR decoding without rewriting that evidence. The corrected run at `beb89f656e1ca8398fd09b0be4799339a4fc1d98` (`v0.8.1-differential-final`) produced 218 agreed comparisons out of 218. The 53 implementation-status fixtures were subsequently promoted at `9493e39bd738372fe1e2fc1b2e96f6a41983c1be` (`v0.8.1-fixtures-confirmed`) without changing their substantive bytes or expected results. These revisions remain the frozen core evidence for v0.9 and v0.9.1 because neither amendment changes a core-model requirement.
+The reviewed v0.8.1 maintenance freeze independently reproduced Appendix B.12 and preserved the model's independently derived record-level `schemaViolation` classification. The immutable freeze also preserved a narrower structural-validator interpretation that the first differential run exposed. The separate reviewed conformance correction at `a94e9a8a7bd2f9c2e0947715ec387b6c3967e4e6` moved schema admission out of deterministic-CBOR decoding without rewriting that evidence. The corrected run at `beb89f656e1ca8398fd09b0be4799339a4fc1d98` (`v0.8.1-differential-final`) produced 218 agreed comparisons out of 218. The 53 implementation-status fixtures were subsequently promoted at `9493e39bd738372fe1e2fc1b2e96f6a41983c1be` (`v0.8.1-fixtures-confirmed`) without changing their substantive bytes or expected results. These revisions remain the frozen core evidence for v0.9, v0.9.1 and v0.9.2 because none of those amendments changes a core-model requirement.
 
 Independence requirements:
 
@@ -649,6 +658,7 @@ The eventual integration suite must demonstrate:
 - cursor reset, including the exact two-field `ResetRequired` response followed by bounded null-cursor enumeration;
 - deterministic concurrent publication showing that a successful `changes` cursor never overtakes an earlier update that is paused before commit and later becomes visible;
 - all `changes` status-dependent required and forbidden field combinations, including rejection of every label `2` through `6` on status `1`;
+- all publish-response status-dependent combinations required by specification v0.9.2: status `0` without a code, status `1` without a code and with each permitted code, status `2` with a permitted rejection code, rejection of status `0` with a code, exhaustive rejection of every other registered code on status `1`, and rejection of status `2` without a code or with `losingRecord`/`duplicate`; the status-`2` success-path test must arrive in HTTP `200`;
 - rejection of an over-`itemLimit` `changes` response without entry processing or cursor advancement;
 - cursor advancement past individually rejected or locally premature candidates in an accepted response;
 - a stored Full record becoming premature after an injected backwards clock correction, producing Error(`premature`) without a state or update-number change;
@@ -680,6 +690,43 @@ CI must enforce the Section 6.2 direct-verification-call restriction. If the sel
 At every protocol-core milestone review, run targeted mutation testing with `cargo-mutants` and retain its report as review evidence. Every surviving mutant in security-sensitive or normative core code must be killed by an added test or individually explained; line coverage alone does not show that executed behaviour is constrained. Mutation testing may run at milestone gates rather than burdening every ordinary push.
 
 No test may depend on the public Internet unless it is clearly separated as an opt-in deployment smoke test.
+
+### 11.8 Independent Motoko participant and interoperability campaigns
+
+The first external participant and campaign are immutable evidence:
+
+| Artefact | Revision |
+| --- | --- |
+| Motoko sealed-authoring-input commit | `7f2243ef729aa21e95e047becef12319ee50d765` |
+| Motoko independent implementation freeze | `3840d9adf07755d326d920f4711dafc4e08bcb40` (`motoko-v0.9.1-independent-freeze`) |
+| Neutral v0.9.1 interoperability bundle | `c90742eb763cda5bd3c6e7d20ab1799590da489b` (`v0.9.1-interop-bundle-reviewed`) |
+| Rust Milestone 5 participant | `8606a102bfb4f2bbfbc81e364bdf548c437bf123` (`milestone-5-v0.9.1-reviewed`) |
+| First Rust–Motoko campaign | `515f37d86a35937b3539bfafdd671291d6abb443` (`v0.9.1-interop-campaign-1`) |
+
+Campaign 1 recorded four findings without normalizing or correcting them inside the archive:
+
+- **W1:** status-`1` publish responses differed by the presence of `duplicate`; specification v0.9.2 resolves this as permitted diagnostic variation, so both byte encodings remain visible and conforming.
+- **W2:** the frozen Motoko serving path re-verifies a retained opaque Full value and substitutes `internalError` where specification Section 12.3 and Appendix B.11.3 require the retained candidate bytes to be served verbatim. Correct this only in a descendant of the frozen tag, with a regression test whose seeded state cannot be produced by ordinary verified ingress.
+- **I1:** Rust derives and validates the DID multihash internally but exposes no narrow production accessor for the exact multihash bytes. Add and review that accessor rather than reconstructing the value in an interoperability adapter.
+- **I2:** the neutral interface does not define the language-independent JSON projection of the Authority Descriptor carried inside a record result. Define one exact projection in the v0.9.2 interface and test both participants against it; an adapter must not invent or normalize the missing shape.
+
+The W2 correction must preserve the byte-string opacity boundary: wrapper parsing and serving may validate the outer response schema and bounds, but a retained Full byte string is opaque at that layer. Ordinary Motoko ingress continues to verify a candidate before it becomes current; the seeded-state regression exists solely to prove that serving does not add a second, contradictory admission decision. Its impossible-state seeding facility is test-only: it must live outside the production actor dependency graph, expose no production or Candid method, and be mechanically absent from the release canister/Wasm build. A gate must fail if the seeding entry point or its state-installation capability becomes reachable from production source, declared service surface or release artefact.
+
+The Motoko transport milestone must implement the complete claimed relay HTTP/CBOR surface—`info`, `directory`, `publish`, `resolve` and `changes`—plus publish-response decoding and client behaviour under v0.9.2. Motoko production modules own protocol parsing, response encoding, cursor and state decisions. A loopback host shim may provide sockets and process plumbing only if it passes method, path, headers and body into the Motoko handler and returns the handler's status, headers and body verbatim. It MUST NOT parse CBOR, choose a status, maintain protocol state, repair output or implement a missing operation. Tamper tests must demonstrate that changed Motoko output reaches the comparison as a disagreement.
+
+Campaign 2 follows this fixed order:
+
+1. derive and review a new neutral bundle from `v0.9.2-reviewed`, retaining the authoring/coordinator directory boundary and preserving the v0.9.1 bundle unchanged;
+2. update Rust and the Motoko descendant from the pinned v0.9.2 specification, add the W2/I1/I2 corrections and complete Motoko transport, then commit and tag both participant revisions before exposing newly derived coordinator expectations;
+3. rerun every participant's complete local conformance, property, fuzz and applicable mutation gates against those exact revisions;
+4. rerun the complete expected-vector phase, including every unchanged case rather than only publication cases;
+5. preserve and digest-check the original pre-exposure Motoko challenge output, rerun both updated participants over the same challenge inputs, and require exact agreement without describing the maintenance rerun itself as newly blind;
+6. rerun the complete live HTTP/CBOR phase in both directions, covering all five operations, publication outcomes `0`/`1`/`2`, Appendix B.11 hostile-peer cases, pagination, cursor reset, update visibility, final selected state and every v0.9.2 publish-response combination; and
+7. archive requests, raw responses, participant pins, manifests, allowed opaque variations and every disagreement before making an interoperability claim.
+
+Campaign 2 is a maintenance interoperability campaign between two reviewed implementations, one of which has an independently authored and immutably preserved ancestor. It is not a second independent-authoring exercise: its Motoko descendant is maintained with knowledge of the public Campaign 1 findings and may therefore know facts about the Rust participant that those findings disclose. Every Campaign 2 report and summary must state this qualification next to its agreement totals and must point to the original frozen tag for the narrower independence claim.
+
+The campaign report counts acceptance/rejection disagreements, symbolic differences explicitly permitted by the specification, implementation defects, interface gaps and unresolved specification ambiguities separately. Permitted status-`1` diagnostic variation is recorded byte-for-byte and is not a disagreement. Any unexplained difference blocks acceptance; it is resolved against the pinned specification, never by participant majority. Campaign 1 remains historically accurate and MUST NOT be amended, regenerated or relabelled after the v0.9.2 resolution.
 
 ## 12. Machine-readable conformance fixtures
 
@@ -758,7 +805,7 @@ Deliver:
 - formatting, linting and test CI;
 - `#![forbid(unsafe_code)]` at the crate root;
 - `cargo-audit` and `cargo-deny` configuration;
-- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status; entries through the CBOR basic-validity taxonomy, byte-string opacity, relay batch isolation, cursor-progress rules, schema-disallowed-simple-value classification and concurrent cursor-visibility invariant must cite their resolution at the applicable pinned specification revision rather than remain open;
+- `SPEC-QUESTIONS.md`, recording identified protocol questions and their resolution status, with the resolution-index table required by Section 2; entries through the CBOR basic-validity taxonomy, byte-string opacity, relay batch isolation, cursor-progress rules, schema-disallowed-simple-value classification and concurrent cursor-visibility invariant must cite their resolution at the applicable pinned specification revision rather than remain open;
 - injected clock and randomness traits; and
 - documented developer commands.
 
@@ -794,14 +841,14 @@ Acceptance:
 - the B.5 RootRevoked wiring test delegates exactly once with label `5`'s exact revealed revocation public key, COSE `Sig_structure` and received signature;
 - the public B.4 `S + L` test uses the non-injectable production record-verification wrapper;
 - CI rejects direct underlying-library verification calls outside the audited strict wrapper;
-- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained at the pinned v0.9.1 commit;
+- the Appendix B.7 item 1 and item 2 fixtures exactly implement the binding and hash-error classifications introduced in specification v0.4 and retained at the pinned v0.9.2 commit;
 - B.8 fails specifically with `identityBindingMismatch` despite a valid attacker signature;
 - B.9 Bob keys, commitment, descriptor, DID, body, `Sig_structure`, digest, signature and envelope reproduce exactly, and Alice/Bob tests prove sticky authority and update state are keyed independently per DID;
 - all five B.10 raw bodies reproduce their stated digests and `Sig_structure` lengths, their signatures verify under Alice's legitimate root key, and every case fails exactly with `invalidCbor` rather than `nonDeterministicCbor`, `schemaViolation` or `invalidSignature`;
 - both B.12 raw bodies reproduce their stated digests and `Sig_structure` lengths, their signatures verify under Alice's legitimate root key, the public deterministic-CBOR validation entry point admits their simple values, and complete record verification fails each exact signed envelope with `schemaViolation` rather than `invalidCbor`, `nonDeterministicCbor` or `invalidSignature`;
 - CBOR tests distinguish not-well-formed/basic-invalid input from basically valid non-deterministic input and from later Followee schema failures, recursively including ignored extension values while stopping at byte-string boundaries;
 - duplicate-map validation compares CBOR data-model key identity rather than bare host-language equality or raw bytes before deterministic validation;
-- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or a URI satisfying specification v0.9.1 Section 7.2, with no mutable registry lookup or normalization;
+- service `mediaType` accepts exactly an RFC 6838 `type-name/subtype-name` without parameters, `language` accepts the complete well-formed RFC 5646 grammar including fixed grandfathered tags, and `rel` accepts exactly an RFC 8288 `reg-rel-type` or a URI satisfying specification v0.9.2 Section 7.2, with no mutable registry lookup or normalization;
 - every numeric core label is accepted only from the corresponding CBOR unsigned-integer key; Boolean `false` and `true` substitutions in Authority Descriptors and public-key objects fail with `schemaViolation`, including the correctly signed, descriptor-bound Appendix B.7 item 17 construction;
 - URI conformance tests accept scheme-bearing queries and fragments, reject every relative-reference form, and accept both lowercase and uppercase `IPvFuture` introducers through the production Contact Document path;
 - service collection tests derive the effective Root and RootRevoked service maxima from the normative aggregate-member counting rule and current record schemas, assert that the computed results are respectively 61 and 60, and prove admission at each computed `N` with aggregate-limit rejection at `N + 1`; the independent 64-entry cap is tested separately, and 61/60 are expected computed results rather than fixture inputs;
@@ -889,6 +936,7 @@ Acceptance:
 - resolve distinguishes Absent from a retained but presently premature record;
 - successful `changes` responses never exceed the request's `itemLimit` and never advance past an omitted eligible entry;
 - `changes` uses the exact two-field status-`1` response as the sole ResetRequired signal, forbids labels `2` through `6` in that response, and enforces every other status-dependent field rule;
+- publish responses enforce the v0.9.2 status-dependent `errorCode` rules, and a conforming status-`2` rejection is returned in an HTTP `200` protocol response;
 - `followee relay serve` accepts a SQLite path, uses the operating-system clock and CSPRNG, defaults to loopback with port-`0` reporting, emits one machine-readable startup object, refuses non-loopback development binding, shuts down cleanly on signals, and preserves relay identity and generations across restart; client-side `relay publish`, `relay resolve` and `relay changes` commands are assigned to Milestone 4;
 - restart preserves identity, generation and sticky authority state; and
 - malformed and oversized input is bounded before expensive processing.
@@ -954,12 +1002,33 @@ Acceptance:
 
 Deliver:
 
-- published neutral fixture bundle;
-- documented HTTP transcript examples;
-- release binaries or reproducible build instructions; and
-- an interoperability run against the independent Motoko implementation when available.
+- a reviewed neutral v0.9.2 fixture and interoperability bundle derived from `v0.9.2-reviewed`, with its authoring and coordinator audiences mechanically separated;
+- documented raw HTTP/CBOR transcript examples for every mandatory relay operation and the Appendix B.11 hostile-peer cases;
+- a reviewed Rust production accessor closing I1 and an exact neutral-interface descriptor projection closing I2, without moving either decision into an adapter;
+- a reviewed Motoko descendant correcting W2 and implementing the complete Motoko-serving and Motoko-client HTTP/CBOR surface described in Section 11.8;
+- release binaries or clean reproducible-build instructions pinned to an exact source revision, Rust toolchain, target, lockfile and digest-pinned build environment; and
+- a complete second interoperability campaign between the reviewed Rust and independently frozen-then-maintained Motoko implementations.
 
-Acceptance follows Section 20.4 of the protocol specification. No implementation may be described as interoperable merely because it communicates with another process built from the same core library.
+Acceptance:
+
+- the v0.9.1 neutral bundle, Motoko independent freeze and Campaign 1 archive remain byte-for-byte unchanged at the pins in Section 11.8; the original frozen Motoko challenge output retains SHA-256 `e73c5697de68df7ec0f693834165bff7a1753a077959c9d9be50553b5722478e`, and the Campaign 1 archive retains aggregate SHA-256 `13efa5fd8a1f4b3c34786eba0e6be7c16b1dc2f85d6585a675183c4cda062a36`;
+- the v0.9.2 bundle manifest pins the reviewed specification commit and SHA-256 from Section 2, identifies every file's provenance and audience, and mechanically proves that coordinator-only expected values are absent from the authoring subset;
+- both participant revisions are committed and tagged before the v0.9.2 coordinator comparison begins, and every orchestration entry point refuses a checkout that does not match its recorded pin;
+- Rust accepts status `1` both without a reason and with accurate `losingRecord`/`duplicate`, rejects every other registered status-`1` code, enforces the status-`0` and status-`2` combinations, and exercises a status-`2` rejection through HTTP `200`;
+- the Motoko W2 regression serves an exactly retained opaque Full byte string without re-verification or substitution, while ordinary ingress still refuses to admit that invalid candidate; its impossible-state injector is test-only and a mechanical production-build gate proves it is absent from the production dependency graph, Candid surface and release Wasm artefact;
+- the I1 Rust accessor returns the exact already-validated multihash bytes for every published and challenge identity, and the adapter contains no DID parsing or multihash reconstruction;
+- the I2 interface projection is exact, language-neutral and exercised identically by Rust and Motoko without adapter normalization;
+- Campaign 2 reruns every Phase 1 expected-vector case and records zero unexplained differences, including permutation invariance and every new v0.9.2 publish-response case; the report labels the Motoko revision as a maintained descendant of an independently frozen ancestor and does not describe Campaign 2 itself as an independent-authoring comparison;
+- Campaign 2 preserves the original pre-exposure Motoko challenge bytes, reruns both maintained participants over every Phase 2 input, and records exact agreement on deterministic bytes, DIDs, digests, signatures, verification results and winners; the report distinguishes this maintenance confirmation from a new blind authoring exercise;
+- Campaign 2 completes Phase 3 in both directions through real loopback HTTP, with the production Rust participant on one side and Motoko-owned protocol handlers on the other, covering `info`, `directory`, `publish`, `resolve` and `changes`, exact request/response bytes where fixed, pagination, reset, update visibility, final state and Appendix B.11 receiver behaviour;
+- any socket or process shim is mechanically shown to be semantic-free: it cannot parse or emit protocol CBOR, choose protocol results, maintain relay state, or repair participant output;
+- permitted status-`1` diagnostic variation remains visible in raw results and is classified separately from disagreements; every acceptance/rejection disagreement, implementation defect, interface gap and unresolved specification ambiguity is separately counted;
+- there are zero unexplained disagreements, no unresolved specification question affects a claimed role, and the final report maps every Section 20.4 obligation to preserved evidence;
+- a clean checkout can build the release executable with the documented locked commands; the release record identifies the source tag, exact Rust version, compilation target, build-environment image digest, binary SHA-256 and dependency/licence evidence, and the produced binary passes a bounded smoke test through its production CLI surfaces; and
+- if byte-for-byte reproducibility is claimed, two clean builds in separately created environments must produce the same binary digest; otherwise documentation must say **reproducible build instructions**, not **reproducible binary**; and
+- any claimed binary-reproducibility result expires when the Rust toolchain, compilation target, lockfile, build flags, base image or other build-environment input changes, and must be re-established with two new clean matching builds rather than inherited from an earlier release.
+
+No implementation may be described as interoperable merely because it communicates with another process built from the same core library. The interoperability claim is permitted only after every acceptance item above and specification Section 20.4 passes against one pinned v0.9.2 participant set.
 
 ## 14. Agent working rules
 
@@ -980,7 +1049,9 @@ An AI coding agent working from this brief should:
 
 For the first coding session, the agent should perform Milestone 0 only, then present the scaffold and CI for review. It should not begin cryptographic or CBOR implementation in the same unreviewed pass.
 
-An independently authored Python model must be assigned through a separate clean session whose context contains its pinned protocol specification and `specification`-status fixtures only. It must not receive Rust source, tests, implementation notes, provisional fixtures, Rust-derived expected outputs or differential reports until the reviewed model is frozen at a recorded revision. Maintenance of the existing clean-room model follows the version-specific v0.8.1 update rules in Section 11.4. The relay-only v0.9 amendment and client-presentation-only v0.9.1 clarification do not trigger another core-model maintenance pass; preserve the reviewed v0.8.1 freeze and correction as immutable evidence, retain the reviewed v0.9 relay work, and apply the v0.9.1 classification in the Rust Milestone 5 client surface. Do not ask the Rust implementation agent to produce its own “independent” model after reading the production code; independence cannot be added as a comment after the fact.
+An independently authored Python model must be assigned through a separate clean session whose context contains its pinned protocol specification and `specification`-status fixtures only. It must not receive Rust source, tests, implementation notes, provisional fixtures, Rust-derived expected outputs or differential reports until the reviewed model is frozen at a recorded revision. Maintenance of the existing clean-room model follows the version-specific v0.8.1 update rules in Section 11.4. The relay-only v0.9 amendment, client-presentation-only v0.9.1 clarification and publish-wrapper-only v0.9.2 clarification do not trigger another Sections 3-through-8 core-model maintenance pass; preserve the reviewed v0.8.1 freeze and correction as immutable evidence. The complete Rust and Motoko conformance and interoperability campaign must nevertheless rerun for v0.9.2 as Section 11.8 requires. Do not ask the Rust implementation agent to produce its own “independent” model after reading the production code; independence cannot be added as a comment after the fact.
+
+The Motoko tag `motoko-v0.9.1-independent-freeze` is likewise immutable. Corrective and transport work begins from a descendant, records the parent and pinned v0.9.2 specification, and freezes a reviewed participant revision before new coordinator expectations are exposed. An agent working on that descendant may use the already public Campaign 1 findings, but it must not describe post-exposure maintenance as a new clean-room implementation or rewrite the original authoring record.
 
 ## 15. Definition of v0.1 completion
 
@@ -995,4 +1066,4 @@ The Rust implementation reaches v0.1 when:
 - the three-relay demonstration is repeatable without privileged infrastructure; and
 - the repository clearly states that the specification, not this code, is normative.
 
-External interoperability with the Motoko implementation is the next release gate, not something the Rust implementation can prove alone.
+External interoperability with the Motoko implementation is Milestone 6's release gate, not something the Rust implementation can prove alone. Campaign 1 is valuable preserved evidence but did not complete the Motoko-serving role surface. Only the complete pinned v0.9.2 Campaign 2 and release evidence defined above can close that gate.
