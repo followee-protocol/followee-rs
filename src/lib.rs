@@ -3,8 +3,10 @@
 //! Non-normative Rust implementation of the Followee DID method and relay
 //! protocol.
 //!
-//! **Status: Milestone 5 (handles and public demonstration) in
-//! progress.** This crate implements the Followee v1 identifier,
+//! **Status: Milestone 6 (external interoperability) in progress as the
+//! maintained v0.9.2 Rust participant — not an independent implementation
+//! and not yet interoperable.** This crate implements the Followee v1
+//! identifier,
 //! deterministic CBOR, COSE, strict Ed25519 verification, record schemas,
 //! signing, and ordering rules; the [`cli`] module backing the `followee`
 //! binary (identity creation, record signing and revocation, verification,
@@ -17,9 +19,10 @@
 //! persisted peer cursors ([`relay::sync`]); the multi-relay [`resolver`]
 //! with shared traversal budgets and the three migration presentation
 //! states; and WebFinger handle discovery, inverse verification, bootstrap,
-//! and the minimal demonstration handle authority ([`webfinger`]). The
-//! public HTTPS deployment of the demonstration authority is prepared but
-//! performed separately.
+//! and the minimal demonstration handle authority ([`webfinger`]); and
+//! the neutral interoperability interface engine ([`interop`]) serving
+//! every v0.9.2 INTERFACE.md operation through the production entry
+//! points, behind `followee interop`.
 //!
 //! The normative authority for protocol behaviour is the pinned Followee
 //! specification in the `followee-protocol/followee` repository, not this
@@ -39,6 +42,7 @@ mod cose;
 pub mod crypto;
 pub mod did;
 pub mod error;
+pub mod interop;
 pub mod limits;
 pub mod ordering;
 pub mod random;
@@ -144,5 +148,17 @@ pub mod fuzzing {
     /// generation.
     pub fn decode_cursor(bytes: &[u8]) {
         let _ = crate::relay::cursor::decode(bytes, &[0u8; 16]);
+    }
+
+    /// Handles arbitrary bytes as one neutral interoperability interface
+    /// request line (Milestone 6): must never panic, hang, or allocate
+    /// unboundedly, and must produce exactly one response line.
+    pub fn interop_handle_line(bytes: &[u8]) {
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            let config = crate::interop::InteropConfig {
+                implementation_commit: "fuzz".to_owned(),
+            };
+            let _ = crate::interop::handle_line(&config, text);
+        }
     }
 }

@@ -1,0 +1,51 @@
+{
+  "authoringSubset": {
+    "aggregateSha256": "1b6514da0c1a0c5289e0909b648b5de73a302e91b346440624badacf5747855e",
+    "files": {
+      "./AUTHORING.md": "4d205b07c01c696a29fd1e415012a1446e5a9d591e3ea00416db857b56bc5b6c",
+      "./NONDETERMINISM.md": "f3cc1f83d00fde03e65a6f977bfee395dbf8cbf72f582102fe322c8a4beb8d15",
+      "./interface/INTERFACE.md": "93c05b48fcaed6383d7ba7ec5629e1f2fe50c6e61bcebfb69c9a5550e9a4247c",
+      "./specification/Followee-Specification.md": "47af5fbf0c4505386b4e04d948ef89d013f878ea820fb02522817661d633633a",
+      "./vectors/challenge/CHALLENGES.md": "8235fc14b7cb6a3d3a0e155189374e4ba5aab1310bb9539fff4c0da31125917c",
+      "./vectors/challenge/challenge-identities.json": "269c9d4a429e6fd37ad2b66d39cf9041c64ccdbc5b2372a4ad1bb0bf9969dd9e",
+      "./vectors/challenge/challenge-records.json": "fb6aaa31bf83eee9d702ff33a6fa81e4400ce3a343da9cae8c7d16052df1ffd1",
+      "./vectors/challenge/challenge-selection.json": "9aabfc8acfd1013bc8d75260b5b64b6f33fac4684d2371f59c30f864b61efde8",
+      "./vectors/published/envelopes-negative.json": "a9d06d3e297f87b4b377f27408ffec1aeaa9643f36007ad22e1e50325f98a801",
+      "./vectors/published/identities.json": "fd9d21e338fd5355889813e1ba19f1041aa194edf4f10c27c470cd1296a94953",
+      "./vectors/published/records.json": "762f65296a0521d0c1e5e031751a37fa9860bc450747168eac421c3b5e54fd7e",
+      "./vectors/published/wire-b11.json": "f47c33eaccee1f3447f65c77a46cddff02ad5ad3215e20c4b0f20e36673e5cab"
+    }
+  },
+  "bundle": "followee-interop/v0.9.2",
+  "outputs": {
+    "challenge-identities.requests.ndjson": "f89d1e639370fbff67ceda4fe338d6aec9723f1aebc6315c6b28d7040a39adf7",
+    "challenge-identities.responses.ndjson": "510d51cddf8273d2cc1f2160dc2242a435564591349e5d5e11e2f31d1ae8f253",
+    "challenge-records.requests.ndjson": "718ead7ec4dfa944ba4a84f9e77818f63408b776f028c367823284a10c3b6634",
+    "challenge-records.responses.ndjson": "b3842f1af376dfcb630ba670a5266d6d43230e1feefe0a8c296371b5c796f269",
+    "challenge-selection.requests.ndjson": "4cac29591d007a38dbcceb5c5ce73886cdff3b1f6684318e9e9fb87954a66bdd",
+    "challenge-selection.responses.ndjson": "82d55b44c15bdb7a13094aeff4293bf7e0c1e4014bd7f791a72b78bec83ff605",
+    "challenge-verify.requests.ndjson": "0dd5bb3f3326c9505935484f66bd7a6fe2cc4de4e5dad8cad67090fd640425fe",
+    "challenge-verify.responses.ndjson": "88bd1938c057e0a87a66ea35cad907b2e9089c38638da9e52c283c21e28f4c8b",
+    "published-identities.requests.ndjson": "1e2f9e1d18f627fe5f44a0e3b4e2464e019988295c568660f676a3458063b101",
+    "published-identities.responses.ndjson": "93742eb49dfd84eff61545831c805296920042d001854e2c04a97511b892e6e2",
+    "published-negative.requests.ndjson": "18713bbc16017dcaba131359f4e7cbbafe3fe12dd7f0add52e8b9533f57b0028",
+    "published-negative.responses.ndjson": "51d5abd491b8dd0480f213895404081a515d30b401887c893c8df521be895dbb",
+    "published-records.requests.ndjson": "edf6c1aacc893e1797bbf82382a82d77a79dc13f8320b1bbe8d4d7dd89e3f914",
+    "published-records.responses.ndjson": "7bf5332ad0a84f6fe4deea02cb5afc89a9c782b671e9a92cdfda711d91ae6ff3",
+    "wire-b11-report.json": "b6c7921939f1595b825e5ed23f1fb099fe7ef5ad7edffb27270696df30b803ce"
+  },
+  "parameters": {
+    "negativeVerifyNowMs": "1785589201123"
+  },
+  "participant": {
+    "implementation": "followee-rs",
+    "repository": "https://github.com/followee-protocol/followee-rs",
+    "toolchain": "rust 1.97.1 (rust-toolchain.toml pin)"
+  },
+  "role": "participant-owned outputs, produced before any coordinator comparison",
+  "specification": {
+    "repositoryCommit": "ac5a794f2fdadc13cddf5367fa3e047617e3e950",
+    "revisionCommit": "f1d19fec0dba455d90d473bfad625d1c288e0c15",
+    "sha256": "47af5fbf0c4505386b4e04d948ef89d013f878ea820fb02522817661d633633a"
+  }
+}

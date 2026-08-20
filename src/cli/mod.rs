@@ -207,6 +207,21 @@ enum TopCommand {
     /// Handle discovery, verification, and the demonstration authority.
     #[command(subcommand)]
     Handle(HandleCommand),
+    /// Serve the neutral interoperability interface: newline-delimited JSON
+    /// requests on stdin, one response per line on stdout (Milestone 6;
+    /// the v0.9.2 bundle INTERFACE.md). Protocol operations are
+    /// deterministic: clocks arrive as explicit inputs and no randomness
+    /// is consulted.
+    Interop(InteropArgs),
+}
+
+#[derive(Args, Debug)]
+struct InteropArgs {
+    /// Value the `hello` operation reports as `implementationCommit`.
+    /// Frozen outputs identify their revision through the repository, so
+    /// this affects only the hello metadata.
+    #[arg(long, default_value = "uncommitted")]
+    implementation_commit: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -689,6 +704,20 @@ fn dispatch(
         }
         TopCommand::Handle(HandleCommand::Serve(args)) => {
             handle::handle_serve(&args, stdout, stderr)
+        }
+        TopCommand::Interop(args) => {
+            let config = crate::interop::InteropConfig {
+                implementation_commit: args.implementation_commit,
+            };
+            let stdin = std::io::stdin();
+            let mut reader = stdin.lock();
+            crate::interop::serve_lines(&config, &mut reader, stdout).map_err(|e| {
+                CliError::Io {
+                    path: PathBuf::from("<interop stdio>"),
+                    source: e,
+                }
+            })?;
+            Ok(None)
         }
     }
 }

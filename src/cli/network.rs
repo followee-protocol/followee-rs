@@ -72,11 +72,21 @@ pub(super) fn relay_publish(args: &RelayPublishArgs, clock: &dyn Clock) -> Resul
             .unwrap_or_default();
         return Err(CliError::PublishRejected(detail));
     }
-    Ok(json!({
+    let mut output = json!({
         "relay": args.relay,
         "recordFile": args.record.display().to_string(),
         "status": status_name,
-    }))
+    });
+    // The optional status-1 no-change reason (specification v0.9.2 section
+    // 12.5) is surfaced verbatim: the bare and coded forms stay visibly
+    // distinct and are never normalized into each other.
+    if response.status == 1
+        && let Some(symbol) = response.error_code.and_then(wire_error_symbol)
+        && let Some(object) = output.as_object_mut()
+    {
+        object.insert("reason".to_owned(), json!(symbol));
+    }
+    Ok(output)
 }
 
 /// `followee relay resolve`: one aligned batch against one relay. Every

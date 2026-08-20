@@ -146,6 +146,30 @@ pub fn verify_followee_ed25519(
     check == r_point
 }
 
+/// [`verify_followee_ed25519`] over unsized byte slices: the production
+/// entry point for callers whose inputs arrive with unconstrained lengths,
+/// such as the neutral `strictEd25519` interoperability operation.
+///
+/// Specification section 3.3 rules 1 and 2 (exact 32-byte public key, exact
+/// 64-byte signature) are enforced here by classification: any other length
+/// is an invalid signature input and verification fails. Every remaining
+/// rule is enforced by the sole strict entry point this function delegates
+/// to.
+#[must_use]
+pub fn verify_followee_ed25519_unsized(
+    public_key: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> bool {
+    let Ok(public_key) = <&[u8; 32]>::try_from(public_key) else {
+        return false;
+    };
+    let Ok(signature) = <&[u8; 64]>::try_from(signature) else {
+        return false;
+    };
+    verify_followee_ed25519(public_key, message, signature)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::arithmetic_side_effects)]

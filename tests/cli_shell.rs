@@ -304,3 +304,43 @@ fn shell_second_create_refuses_overwrite_and_reports_symbol() {
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(stdout_json(&output)["error"]["symbol"], "keyFileExists");
 }
+
+#[test]
+fn interop_subcommand_serves_the_interface_over_stdio() {
+    // Milestone 6: the production binary serves the neutral interface as
+    // newline-delimited JSON on stdin/stdout, with diagnostics confined to
+    // stderr.
+    use std::io::Write;
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_followee"))
+        .args(["interop", "--implementation-commit", "shelltest"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(
+            b"{\"interfaceProtocol\":\"1\",\"caseId\":\"s1\",\"operation\":\"hello\",\"input\":{}}\n\
+              {\"interfaceProtocol\":\"1\",\"caseId\":\"s2\",\"operation\":\"receivePublishResponse\",\
+              \"input\":{\"responseHex\":\"a300010101020c\"}}\n",
+        )
+        .expect("write");
+    let output = child.wait_with_output().expect("wait");
+    assert!(output.status.success(), "exit 0");
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    let lines: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("response JSON"))
+        .collect();
+    assert_eq!(lines.len(), 2, "one response per request line");
+    assert_eq!(lines[0]["status"], "accepted");
+    assert_eq!(lines[0]["result"]["implementationCommit"], "shelltest");
+    // Status 1 with the losingRecord diagnostic decodes through the
+    // production v0.9.2 publish-response path.
+    assert_eq!(lines[1]["status"], "accepted");
+    assert_eq!(lines[1]["result"]["status"], "1");
+    assert_eq!(lines[1]["result"]["errorCode"], "12");
+}

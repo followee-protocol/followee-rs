@@ -49,6 +49,12 @@ pub(crate) mod wire_code {
     pub const PREMATURE: u64 = 10;
     /// `rootRevoked` (code 11).
     pub const ROOT_REVOKED: u64 = 11;
+    /// `losingRecord` (code 12): a status-`1` no-change reason only, never a
+    /// rejection (specification v0.9.2 sections 12.5 and 15.3).
+    pub const LOSING_RECORD: u64 = 12;
+    /// `duplicate` (code 13): a status-`1` no-change reason only, never a
+    /// rejection (specification v0.9.2 sections 12.5 and 15.3).
+    pub const DUPLICATE: u64 = 13;
     /// `responseTooLarge` (code 16).
     pub const RESPONSE_TOO_LARGE: u64 = 16;
     /// `invalidCursor` (code 18).

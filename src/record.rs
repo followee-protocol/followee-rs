@@ -238,6 +238,19 @@ pub fn seal_record_body(body_bytes: &[u8], seed: &[u8; 32]) -> Vec<u8> {
     cose::assemble_envelope(body_bytes, &signature)
 }
 
+/// Wire presence of the record's optional collection-valued fields:
+/// the Contact Document's optional collections plus record-body label `8`.
+/// Absent and present-empty are distinct wire encodings (specification
+/// sections 5.2 and 7.1); the typed model merges them, so the parser
+/// records which encoding was received for faithful projections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WirePresence {
+    /// Presence of the Contact Document's optional collection labels.
+    pub contact: crate::contact::ContactPresence,
+    /// Record-body label `8` (record `extensions`) was present on the wire.
+    pub record_extensions: bool,
+}
+
 /// A parsed, schema-valid record body plus the exact payload byte ranges
 /// needed for descriptor binding and commitment checks.
 pub(crate) struct ParsedBody {
@@ -251,6 +264,7 @@ pub(crate) struct ParsedBody {
     pub valid_until_ms: Option<u64>,
     pub contact: ContactDocument,
     pub extensions: ExtensionMap,
+    pub presence: WirePresence,
 }
 
 /// Parses one record body from validated payload bytes, enforcing the exact
@@ -273,6 +287,7 @@ pub(crate) fn parse_record_body(payload: &[u8]) -> Result<ParsedBody, VerifyErro
     let mut valid_until_ms = None;
     let mut contact_range: Option<Range<usize>> = None;
     let mut extensions = ExtensionMap::new();
+    let mut record_extensions_present = false;
 
     for _ in 0..head.arg {
         let key = r.read_head().map_err(VerifyError::from)?;
@@ -312,6 +327,7 @@ pub(crate) fn parse_record_body(payload: &[u8]) -> Result<ParsedBody, VerifyErro
                 contact_range = Some(start..r.position());
             }
             8 => {
+                record_extensions_present = true;
                 let ext_start = r.position();
                 r.skip_value().map_err(VerifyError::from)?;
                 let slice = &payload[ext_start..r.position()];
@@ -350,7 +366,7 @@ pub(crate) fn parse_record_body(payload: &[u8]) -> Result<ParsedBody, VerifyErro
     if contact_slice.len() > MAX_CONTACT_BYTES {
         return Err(VerifyError::SchemaViolation);
     }
-    let contact = contact::parse_contact(contact_slice, &id_text)?;
+    let (contact, contact_presence) = contact::parse_contact(contact_slice, &id_text)?;
 
     Ok(ParsedBody {
         id_text,
@@ -363,6 +379,10 @@ pub(crate) fn parse_record_body(payload: &[u8]) -> Result<ParsedBody, VerifyErro
         valid_until_ms,
         contact,
         extensions,
+        presence: WirePresence {
+            contact: contact_presence,
+            record_extensions: record_extensions_present,
+        },
     })
 }
 
@@ -388,7 +408,10 @@ fn read_tstr_bounded(r: &mut Reader<'_>, max: usize) -> Result<String, VerifyErr
 
 fn parse_descriptor(r: &mut Reader<'_>) -> Result<AuthorityDescriptor, VerifyError> {
     let head = r.read_head().map_err(VerifyError::from)?;
-    if head.major != MAJOR_MAP || head.arg != 3 {
+    if head.major != MAJOR_MAP {
+        return Err(VerifyError::SchemaViolation);
+    }
+    if head.arg != 3 {
         return Err(VerifyError::SchemaViolation);
     }
     let mut version = None;
@@ -417,7 +440,10 @@ fn parse_descriptor(r: &mut Reader<'_>) -> Result<AuthorityDescriptor, VerifyErr
 
 fn parse_public_key(r: &mut Reader<'_>) -> Result<[u8; 32], VerifyError> {
     let head = r.read_head().map_err(VerifyError::from)?;
-    if head.major != MAJOR_MAP || head.arg != 2 {
+    if head.major != MAJOR_MAP {
+        return Err(VerifyError::SchemaViolation);
+    }
+    if head.arg != 2 {
         return Err(VerifyError::SchemaViolation);
     }
     let mut suite_ok = false;

@@ -169,3 +169,48 @@ fn resolve_deadline_flag_reaches_the_shared_budget() {
     let diagnostics = json["resolution"]["diagnostics"].as_array().expect("diags");
     assert_eq!(diagnostics[0]["event"], "budgetStopped");
 }
+
+#[test]
+fn relay_publish_surfaces_the_status_1_reason_verbatim() {
+    // Specification v0.9.2 section 12.5: a relay MAY attach the accurate
+    // no-change diagnostic to status 1. This relay implementation never
+    // emits the coded form, so a canned peer responds with
+    // {0: 1, 1: 1, 2: 13} (duplicate); the CLI must surface the reason
+    // verbatim rather than dropping or normalizing it.
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    // Detached responder: the assertions below depend only on the CLI
+    // output, so the test never blocks on this thread (a CLI mutant that
+    // skips the network entirely must fail by assertion, not by hanging).
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        // Read the request head and body far enough to unblock the client.
+        let mut buffer = [0u8; 65536];
+        let _ = stream.read(&mut buffer);
+        let body: [u8; 7] = [0xA3, 0x00, 0x01, 0x01, 0x01, 0x02, 0x0D];
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/cbor\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(head.as_bytes()).expect("head");
+        stream.write_all(&body).expect("body");
+    });
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let record_path = dir.path().join("record.cose");
+    std::fs::write(&record_path, fx_bytes("root_record_envelope")).expect("write record");
+    let (code, json) = cli(&[
+        "relay",
+        "publish",
+        "--relay",
+        &format!("http://{addr}/"),
+        "--record",
+        record_path.to_str().expect("utf-8 path"),
+        "--policy",
+        "development",
+    ]);
+    assert_eq!(code, 0, "status 1 is a successful no-change outcome");
+    assert_eq!(json["status"], "noChange");
+    assert_eq!(json["reason"], "duplicate", "the exact received diagnostic");
+}

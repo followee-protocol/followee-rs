@@ -37,6 +37,7 @@ pub struct VerifiedRecord {
     payload: Range<usize>,
     body: RecordBody,
     body_digest: [u8; 32],
+    wire_presence: crate::record::WirePresence,
 }
 
 impl VerifiedRecord {
@@ -74,6 +75,16 @@ impl VerifiedRecord {
     #[must_use]
     pub fn timestamp_ms(&self) -> u64 {
         self.body.timestamp_ms
+    }
+
+    /// Wire presence of the record's optional collection-valued fields, as
+    /// observed by the production parser: absent and present-empty are
+    /// distinct wire encodings (specification sections 5.2 and 7.1) that
+    /// the typed body merges, so faithful projections consume this record
+    /// of which encoding was received.
+    #[must_use]
+    pub fn wire_presence(&self) -> crate::record::WirePresence {
+        self.wire_presence
     }
 }
 
@@ -194,6 +205,7 @@ pub(crate) fn verify_record_with_verifier(
             extensions: parsed.extensions,
         },
         body_digest,
+        wire_presence: parsed.presence,
     })
 }
 

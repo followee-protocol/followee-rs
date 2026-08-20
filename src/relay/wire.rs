@@ -704,11 +704,23 @@ pub(crate) fn parse_info_response(bytes: &[u8]) -> Result<RelayInfo, VerifyError
             _ => return Err(VerifyError::SchemaViolation),
         }
     }
+    // Section 12.2: a v1 implementation MUST include protocol version `1`
+    // and signature suite `-19` in these arrays. An info response missing
+    // either is non-conforming output; the strict client rejects it
+    // completely rather than exposing partial peer metadata.
+    let protocol_versions = protocol_versions.ok_or(VerifyError::SchemaViolation)?;
+    if !protocol_versions.contains(&1) {
+        return Err(VerifyError::SchemaViolation);
+    }
+    let suites = suites.ok_or(VerifyError::SchemaViolation)?;
+    if !suites.contains(&crate::record::SUITE_ED25519) {
+        return Err(VerifyError::SchemaViolation);
+    }
     Ok(RelayInfo {
         relay_id: relay_id.ok_or(VerifyError::SchemaViolation)?,
         capabilities: capabilities.ok_or(VerifyError::SchemaViolation)?,
-        protocol_versions: protocol_versions.ok_or(VerifyError::SchemaViolation)?,
-        suites: suites.ok_or(VerifyError::SchemaViolation)?,
+        protocol_versions,
+        suites,
         limits: limits.ok_or(VerifyError::SchemaViolation)?,
         cursor_generation: cursor_generation.ok_or(VerifyError::SchemaViolation)?,
         directory_generation: directory_generation.ok_or(VerifyError::SchemaViolation)?,
@@ -857,6 +869,7 @@ pub(crate) fn parse_directory_response(bytes: &[u8]) -> Result<ReceivedDirectory
                     return Err(VerifyError::SchemaViolation);
                 }
                 let mut list = Vec::with_capacity(count);
+                let mut seen_indices = std::collections::HashSet::with_capacity(count);
                 for _ in 0..count {
                     let members = read_map_head(&mut r)?;
                     if members != 4 {
@@ -881,8 +894,18 @@ pub(crate) fn parse_directory_response(bytes: &[u8]) -> Result<ReceivedDirectory
                             _ => return Err(VerifyError::SchemaViolation),
                         }
                     }
+                    let index = index.ok_or(VerifyError::SchemaViolation)?;
+                    // Section 11.4: an index is meaningful only as one
+                    // mapping within the response's directory generation and
+                    // must not be reused. A response assigning the same
+                    // index twice is non-conforming output whose Ref
+                    // resolution would be ambiguous; the strict client
+                    // rejects the complete response.
+                    if !seen_indices.insert(index) {
+                        return Err(VerifyError::SchemaViolation);
+                    }
                     list.push(DirectoryEntry {
-                        index: index.ok_or(VerifyError::SchemaViolation)?,
+                        index,
                         relay_id: relay_id.ok_or(VerifyError::SchemaViolation)?,
                         endpoint: endpoint.ok_or(VerifyError::SchemaViolation)?,
                         capabilities: capabilities.ok_or(VerifyError::SchemaViolation)?,
@@ -899,20 +922,40 @@ pub(crate) fn parse_directory_response(bytes: &[u8]) -> Result<ReceivedDirectory
     })
 }
 
-/// A parsed `v1/publish` response (specification section 12.5).
+/// A parsed, v0.9.2-conforming `v1/publish` response (specification
+/// section 12.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReceivedPublishResponse {
     /// Status: `0` admitted and current, `1` valid but no change, `2`
     /// rejected. "Admitted" is current at that relay only.
     pub status: u64,
-    /// The section 15.3 error code. Section 12.5 marks it optional without
-    /// binding it to a status, so it is surfaced exactly as received
-    /// (SPEC-QUESTIONS.md SQ-17).
+    /// The section 15.3 error code, already validated against the v0.9.2
+    /// status-dependent rules: absent on status `0`; absent or exactly the
+    /// `losingRecord`/`duplicate` diagnostic on status `1`; a registered
+    /// rejection code other than those two on status `2`.
     pub error_code: Option<u64>,
 }
 
-/// Parses a `v1/publish` response under the exact schema.
-pub(crate) fn parse_publish_response(bytes: &[u8]) -> Result<ReceivedPublishResponse, VerifyError> {
+/// Parses a `v1/publish` response, enforcing the specification v0.9.2
+/// status-dependent union of section 12.5 in addition to the section 6.1
+/// layers and the Appendix A CDDL shape.
+///
+/// This is the one production wrapper-acceptance path for publish
+/// responses: [`super::client::RelayClient::publish`] and the neutral
+/// `receivePublishResponse` interoperability operation both decode through
+/// it. Status `0` forbids `errorCode`; status `1` permits it only as the
+/// `losingRecord` (12) or `duplicate` (13) diagnostic; status `2` requires
+/// a registered section 15.3 code other than those two. Every other
+/// combination — including any code outside the section 15.3 registry —
+/// fails the applicable v1 schema and the complete response is rejected
+/// without extracting a status (section 12.5: "MUST NOT extract a status
+/// from it"). Deeper CBOR faults retain their exact section 6.1
+/// classification (`invalidCbor` / `nonDeterministicCbor`).
+///
+/// # Errors
+///
+/// Returns the [`VerifyError`] classification for the rejected response.
+pub fn parse_publish_response(bytes: &[u8]) -> Result<ReceivedPublishResponse, VerifyError> {
     let mut r = validated_response_reader(bytes, PUBLISH_RESPONSE_MAX_MEMBERS)?;
     let entries = read_map_head(&mut r)?;
     if !(2..=3).contains(&entries) {
@@ -934,10 +977,24 @@ pub(crate) fn parse_publish_response(bytes: &[u8]) -> Result<ReceivedPublishResp
             _ => return Err(VerifyError::SchemaViolation),
         }
     }
-    Ok(ReceivedPublishResponse {
-        status: status.ok_or(VerifyError::SchemaViolation)?,
-        error_code,
-    })
+    let status = status.ok_or(VerifyError::SchemaViolation)?;
+    use super::wire_code::{DUPLICATE, LOSING_RECORD};
+    match (status, error_code) {
+        // Status 0: errorCode forbidden.
+        (0, None) => {}
+        // Status 1: no code, or exactly the accurate no-change diagnostic.
+        // (Accuracy is the emitting relay's obligation; a receiver can only
+        // enforce the permitted code set.)
+        (1, None) | (1, Some(LOSING_RECORD | DUPLICATE)) => {}
+        // Status 2: a registered section 15.3 rejection code is required,
+        // and the two no-change reasons never mark a rejection.
+        (2, Some(code))
+            if code != LOSING_RECORD
+                && code != DUPLICATE
+                && crate::error::wire_error_symbol(code).is_some() => {}
+        _ => return Err(VerifyError::SchemaViolation),
+    }
+    Ok(ReceivedPublishResponse { status, error_code })
 }
 
 /// One received `v1/changes` entry: untrusted protocol data. The DID is a

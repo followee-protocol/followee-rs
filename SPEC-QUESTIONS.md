@@ -3,8 +3,8 @@
 Ambiguities identified in the normative specification
 (`followee-protocol/followee`), tracked against the pinned commit in
 IMPLEMENTATION.md section 2 (currently repository commit
-`fd8f6a8b2311677be38bd22a0a3265539dca2158`, specification revision
-`5bea128f2800cc3fd443fa7440f8c247b9d4a9c8`, draft v0.9.1). Per
+`ac5a794f2fdadc13cddf5367fa3e047617e3e950`, specification revision
+`f1d19fec0dba455d90d473bfad625d1c288e0c15`, draft v0.9.2). Per
 IMPLEMENTATION.md section 2, questions are resolved in the protocol repository
 — never silently in this implementation — and no milestone may pass while an
 open question affects code delivered by that milestone. Resolving a question
@@ -12,9 +12,35 @@ that amends the specification requires re-pinning IMPLEMENTATION.md section 2
 and rerunning the complete conformance and differential suite.
 
 **All recorded questions are resolved**, and every resolution remains in
-force in specification v0.9.1 at the pinned commit. Each resolved entry
+force in specification v0.9.2 at the pinned commit. Each resolved entry
 cites the amending version and records the test obligation the resolution
 creates.
+
+## Resolution index
+
+Audit aid required by IMPLEMENTATION.md section 2: one row per question
+category, with the resolving specification revision, present status, and the
+evidence pinning the resolution. It supplements — never replaces — the full
+entries below.
+
+| Category | SQ entries | Affected surface | Resolving revision | Status | Pinning evidence |
+| --- | --- | --- | --- | --- | --- |
+| Identity binding and DID error classification | SQ-1, SQ-2, SQ-8 | Record verifier core; resolver continuation | v0.3 `a66228c`; v0.4/v0.5 `41f82fa` | resolved | `tests/negative_b7.rs` binding/hash cases; `resolution.rs` continuation tests; Appendix B.7 items 1–2 fixtures |
+| Premature-record serving | SQ-3 | Relay resolve path | v0.2 `7e81d32` | resolved | `relay_core::sec_12_3_locally_premature_current_record_is_error_not_absent`, `sec_13_3_retained_premature_tuple_stays_in_changes_and_out_of_resolve` |
+| `changes` status-dependent fields and reset encoding | SQ-4, SQ-5, SQ-7 | Relay and client `changes` wrappers | v0.2 `7e81d32`; v0.3 `a66228c` | resolved | `relay_core::sec_12_6_*`, `relay_client::sec_12_6_*` status/field suites |
+| Handle local-part case policy | SQ-6 | Demonstration handle authority | v0.2 `7e81d32` | resolved | `handle_authority.rs` case-variant tests |
+| Service metadata grammars | SQ-9 | Contact Document schema | v0.6 `44c6866` | resolved | `conformance.rs` mediaType/language/rel boundary tests |
+| URI production and exact CBOR label typing | SQ-10 | Contact and descriptor schemas | v0.7 `abc9a55` | resolved | `conformance.rs` URI-profile and Boolean-label tests; B.7 item 17 fixture |
+| CBOR basic-validity taxonomy | SQ-11 | Deterministic CBOR layer | v0.8 `610f9a1` | resolved | Appendix B.10 conformance suite (`conformance.rs`) |
+| Byte-string opacity | SQ-12 | CBOR layer; relay wrappers | v0.8 `610f9a1` | resolved | `b11_vectors.rs`; `relay_client` candidate-isolation tests |
+| Relay batch isolation | SQ-13 | Relay HTTP surface | v0.8 `610f9a1` | resolved | `relay_http.rs` B.11.1/B.11.4/B.11.6 tests |
+| Synchronization cursor progress | SQ-14 | Synchronization receiver | v0.8 `610f9a1` | resolved | `sync_receiver.rs` B.11.5/B.11.7 tests |
+| Schema-disallowed simple values | SQ-15 | CBOR/schema boundary | v0.8.1 `2d5292e` | resolved | Appendix B.12 conformance suite; `validate_cbor_api.rs` |
+| Concurrent cursor visibility | SQ-16 | Relay ingress and `changes` | v0.9 `13777db` | resolved | `relay_concurrency.rs` deterministic interleaving |
+| Publish-response field presence | SQ-17 | Publish wrapper: production client decoder and relay encoder | v0.9.2 `f1d19fec` | resolved | `relay_client::sec_12_5_*` combination suite; `interop.rs` `receivePublishResponse` suite; `relay_http` v0.9.2 loop tests |
+| `changes` entry-ordering receiver validation | SQ-18 | Production client | derived reading at v0.9 `13777db`, unchanged by v0.9.2 | resolved (derived, non-blocking) | `relay_client::sec_12_6_misordered_last_updated_rejects_the_complete_response` |
+| Peer-cursor keying | SQ-19 | Synchronization receiver | derived reading at v0.9 `13777db`, unchanged by v0.9.2 | resolved (derived, non-blocking) | `sync_receiver::sec_12_7_peer_identity_*` tests |
+| Migration stale-state classification | SQ-20 | Resolver presentation states | v0.9.1 `5bea128` | resolved | `migration_states.rs` stale claimant/counterpart suite |
 
 ---
 
@@ -467,19 +493,42 @@ semantics, which are unambiguous.
 
 ## SQ-17 — `publish-response` `errorCode`: is it bound to status `2`?
 
-**Status:** resolved as a non-blocking derived reading (spec v0.9, commit `13777db`) · **Affected:** Milestone 4 client · **Spec:** section 12.5; Appendix A `publish-response`
+**Status:** resolved (spec v0.9.2, commit `f1d19fec`) · **Affected:** Milestone 4 client; Milestone 6 participant · **Spec:** sections 12.5, 15.3, 15.4, 20.2; Appendix A `publish-response`
 
-Section 12.5 shows `? 2: errorCode` and describes the three statuses, but —
-unlike section 12.6 for `changes-response` — states no status-dependent
-required/forbidden rule for label `2`. The v1 relay in this repository emits
-the code only with status `2`, and rejection semantics do not depend on the
-answer, so this does not affect conformance. Derived reading: the production
-client accepts label `2` with any status per the Appendix A CDDL and surfaces
-it verbatim without inferring anything from it. If a future amendment binds
-the field to status `2`, only the client-side schema check tightens.
+Section 12.5 originally showed `? 2: errorCode` and described the three
+statuses without a status-dependent required/forbidden rule for label `2`.
+This repository recorded the permissive derived reading (accept label `2`
+with any status, surface it verbatim) at v0.9; the first Rust–Motoko
+interoperability campaign then exposed the ambiguity as its W1 finding when
+the two participants encoded a status-`1` duplicate differently.
 
-**Test obligation (Milestone 4):** `relay::wire` publish-response parser
-tests; `cli_shell`/demo assertions consume the emitted-with-status-2 form.
+Resolved by amendment. Specification v0.9.2 states the status-dependent
+union normatively: on status `0` `errorCode` MUST be absent; on status `1`
+it MAY be present as a diagnostic and MUST then be `losingRecord` or
+`duplicate`, accurately identifying the no-change reason; on status `2` it
+is required, identifies the rejection with a section 15.3 code, and MUST
+NOT be `losingRecord` or `duplicate`. Any other combination — including
+any code outside the section 15.3 registry — fails the applicable v1
+schema, and the receiver rejects the complete response without extracting
+a status. A conforming status-`2` rejection remains successful HTTP-layer
+processing carried in HTTP `200`. Both Campaign 1 status-`1` encodings
+(bare, and with the permitted diagnostic) are conforming and remain
+visibly distinct rather than normalized; the relay in this repository
+retains its deterministic no-code status-`1` encoding.
+
+The production client decoder (`relay::wire::parse_publish_response`, the
+single path behind `RelayClient::publish` and the neutral
+`receivePublishResponse` operation) now enforces the union; deeper CBOR
+faults retain their exact section 6.1 classification. The relay encoder
+already conformed.
+
+**Test obligation (Milestone 6, v0.9.2):**
+`relay_client::sec_12_5_client_accepts_every_conforming_publish_response`,
+`sec_12_5_client_rejects_every_invalid_publish_combination_completely`,
+`sec_12_5_client_keeps_deeper_cbor_classifications_for_publish`;
+`interop::sec_12_5_receive_publish_response_*` (accept/reject/CBOR-layer);
+`relay_http::sec_12_5_v0_9_2_publish_outcomes_decode_through_the_production_client_over_http`;
+the retained `relay_http::sec_12_5_publish_statuses_and_exact_byte_resolution`.
 
 ## SQ-18 — `changes` success entries: is the receiver required to validate ordering?
 

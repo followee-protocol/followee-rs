@@ -579,3 +579,132 @@ Review findings, all closed:
 The one final survivor is the already-accepted `percent_decode`
 `(hi << 4) | lo` → `^` disjoint-bit equivalence. No other survivor
 exists in any module changed by this pass.
+
+## Milestone 6 — maintained v0.9.2 participant pass
+
+Scoped sweep over every production file this pass changed or added —
+`src/relay/wire.rs`, `src/did.rs`, `src/crypto.rs`, `src/interop/mod.rs`,
+`src/interop/json.rs`, `src/cli/network.rs` — with the retained Milestone
+1–5 evidence standing for every unchanged module:
+
+- first sweep (`mutants.m6/`, local, gitignored artifacts): **511 mutants:
+  407 caught, 48 missed, 56 unviable, 0 timeouts**.
+
+Review of the 48 survivors closed all of them, by added tests, by
+production simplification, or as individually explained equivalents:
+
+**Killed by added tests or simplification:**
+
+- `src/interop/json.rs` string/escape survivors (`skip_ws` stub, `\uXXXX`
+  hex-digit match arms, surrogate-pair bit arithmetic, writer control-char
+  guard and digit arithmetic, `<`→`<=`/`==` on the control boundary) —
+  killed by the added unit tests
+  `insignificant_whitespace_is_skipped_between_tokens`,
+  `unicode_escapes_decode_to_the_exact_code_points`, and
+  `writer_escapes_exactly_the_control_characters`; the depth-boundary
+  `>`→`>=` killed by `nesting_depth_boundary_is_exact`.
+- `src/interop/mod.rs` `handle_line`/`serve_lines` 1 MiB boundary
+  survivors — killed by `interop::interface_line_length_boundary_is_exact`
+  and `interface_serve_lines_handles_an_unterminated_final_line` (exact-cap
+  and cap-plus-one lines; unterminated final line).
+- `src/interop/mod.rs` `parse_dec_u64` survivors (`||`→`&&` letting
+  `"+5"` through Rust's sign-accepting `u64::from_str`; leading-zero and
+  length-boundary mutants) — killed by
+  `interface_decimal_string_convention_boundaries` (`"+5"`, `"01"`,
+  `"1a"`, `""`, `" 1"` rejected; `"0"` accepted).
+- `src/interop/mod.rs` `parse_nint_magnitude` `||` survivors — killed by
+  `interface_nint_convention_boundaries` (`-01`, `-+5`, `-`,
+  `-(2^64+1)` rejected; exactly `-2^64` accepted); the unreachable
+  `magnitude == 0` disjunct (excluded by the leading-zero rule) was
+  removed, so its operator no longer exists to mutate.
+- `src/interop/mod.rs` `op_select_current` deleted `"root"` sticky arm —
+  killed by `select_current_accepts_every_sticky_authority_form`.
+- `src/interop/mod.rs` `contact_from_json` deleted `avatar` field — killed
+  by `contact_round_trip_preserves_every_member`.
+- `src/interop/mod.rs` `encode_key` stub survivors — the conversion-side
+  sort was redundant (the deterministic writer sorts every map by encoded
+  key, and production validation rejects duplicates before encoding), so
+  the sort and its helper were removed rather than pinned.
+- `src/cli/network.rs` `relay_publish` `== 1`→`!=` on the status-1 reason
+  member — killed by
+  `cli_network_inprocess::relay_publish_surfaces_the_status_1_reason_verbatim`
+  (canned peer answering `{0:1, 1:1, 2:13}`).
+
+**Individually explained equivalents (accepted survivors):**
+
+- `src/did.rs:50` `s.len() > MAX_URI_BYTES` `>`→`==`/`>=`: a pre-decode
+  work bound only. Every affected input (any string over ~55 characters)
+  is rejected as `invalidDid` by base58/multihash validation regardless,
+  so the observable classification is identical; the bound limits work,
+  not outcomes.
+- `src/did.rs:167` `shift > 63` `>`→`==`/`>=` in `read_minimal_varint`:
+  the nine-byte iteration cap makes `shift` top out at exactly 63, so all
+  three comparisons return `None` for the same inputs; the check is
+  defence in depth behind the length cap.
+- `src/interop/json.rs:98` depth `>`→`==`: nesting depth increases by
+  exactly 1 per level, so any chain deeper than the cap passes through
+  equality first; the mutant fires on exactly the same inputs.
+- `src/relay/wire.rs:638/649` `head.major != ARRAY || head.arg == 0`
+  `||`→`&&` in `parse_info_response`: an empty version/suite array now
+  also fails the v0.9.2-pass requirement that the arrays contain protocol
+  version `1` and suite `-19`, producing the same complete
+  `schemaViolation` rejection; the emptiness check is doubly enforced.
+- `src/cli/network.rs` command-budget head-room constants
+  (`1024 * 1024` in `relay_publish`, first `*` in `relay_resolve`,
+  `64 * 1024` in `relay_changes`/`relay_sync`): the already-reviewed
+  Milestone 4/5 accepted survivors, unchanged by this pass — every
+  response these commands can accept is independently bounded first by
+  the client's per-request caps, so the mutated head-room remains above
+  every reachable size within protocol bounds.
+
+A verification re-sweep over the three files with new or changed tests
+(`src/interop/mod.rs`, `src/interop/json.rs`, `src/cli/network.rs`;
+`mutants.m6.rerun/`) confirms the closures: **205 mutants: 159 caught,
+6 missed, 39 unviable, 1 timeout**, where the 6 missed are exactly the
+already-reviewed Milestone 4/5 accepted budget-constant survivors listed
+above and the single timeout was the `relay_publish` whole-function stub
+hanging the canned-peer test on its unconditional `join` — detection by
+hang rather than assertion. The responder thread was then detached so the
+assertions alone must fail, and a spot re-verification of the
+`relay_publish` mutants (`mutants.m6.spot/`) shows the stub **caught**
+with 0 timeouts: **10 mutants: 7 caught, 1 missed (the accepted
+`1024 * 1024` budget constant), 2 unviable**. The `src/did.rs`,
+`src/crypto.rs`, and `src/relay/wire.rs` results stand from the first
+sweep (0 missed in `src/crypto.rs`; the `src/did.rs` and
+`src/relay/wire.rs` survivors are exactly the explained equivalents
+above). No unexplained survivor remains in any file this pass touched.
+
+## Milestone 6 — authoring revision 2 adaptation
+
+The neutral authoring input was corrected (revision 2; only
+`interface/INTERFACE.md` changed). The adaptation changed
+`src/contact.rs`, `src/record.rs`, and `src/verify.rs` (wire-presence
+capture for the lossless revision-2 projection) and `src/interop/mod.rs`
+(the revision-2 accepted-result projection and constructor
+canonicalization). Scoped sweep over those four files (`mutants.m6.rev2/`):
+**473 mutants: 415 caught, 6 missed, 52 unviable, 0 timeouts**.
+
+All six survivors closed:
+
+- `src/interop/mod.rs` `contact_from_json` migration `||`→`&&` (a
+  single-member migration object would be silently dropped as an omission
+  request) — **killed** by the added
+  `interop::migration_object_with_one_member_is_authored_and_projected`.
+- `src/record.rs` `parse_descriptor` and `parse_public_key` map-head
+  `!= MAP || != n` `||`→`&&` — the disjuncts were **removed** by
+  splitting each check into two sequential `if`s (behaviour-identical;
+  no operator remains to mutate). A spot re-verification over those
+  functions and `contact_from_json` (`mutants.m6.rev2spot/`) confirms:
+  **23 mutants: 22 caught, 0 missed, 1 unviable, 0 timeouts**.
+- `src/contact.rs` `is_language_tag` guard `is_empty() || !is_ascii()`
+  `||`→`&&`: **explained equivalent-outcome**. The guard is a fast path:
+  an empty tag still fails the empty-segment check on `parts`, and a
+  non-ASCII tag cannot match the ASCII grandfathered table or the
+  ASCII-strict subtag validators, so every input the guard rejects is
+  rejected downstream with the same classification.
+- `src/contact.rs` service `mediaType` length `>`→`>=`/`==`:
+  **explained equivalent-outcome**. `is_restricted_name` caps each RFC
+  6838 name at 127 characters, so the longest grammar-valid `mediaType`
+  is 255 bytes; every string the 256-byte length bound rejects already
+  fails the grammar check in the same disjunction. The bound is retained
+  as defence in depth against future grammar changes.

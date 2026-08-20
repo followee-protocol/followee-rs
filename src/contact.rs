@@ -562,18 +562,40 @@ fn encode_extension_value(value: &ExtensionValue) -> Vec<u8> {
     })
 }
 
-/// Parses and validates a Contact Document from its exact validated slice.
-/// `containing_did` is the record's body `id` text.
+/// Wire presence of the optional collection-valued Contact Document labels.
+///
+/// Specification sections 5.2 and 7.1 make these fields optional, and an
+/// optional array or map may be either absent or present and empty — two
+/// distinct wire encodings with the same protocol meaning. The typed
+/// [`ContactDocument`] merges them (an empty collection), so the parser
+/// records which encoding was actually received; faithful projections —
+/// the neutral interoperability interface's lossless accepted output —
+/// consume this instead of re-deriving it from the bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ContactPresence {
+    /// Label `3` (`alsoKnownAs`) was present on the wire.
+    pub also_known_as: bool,
+    /// Label `4` (`services`) was present on the wire.
+    pub services: bool,
+    /// Label `6` (contact `extensions`) was present on the wire.
+    pub extensions: bool,
+}
+
+/// Parses and validates a Contact Document from its exact validated slice,
+/// returning the document and the wire presence of its optional
+/// collection-valued labels. `containing_did` is the record's body `id`
+/// text.
 pub(crate) fn parse_contact(
     slice: &[u8],
     containing_did: &str,
-) -> Result<ContactDocument, VerifyError> {
+) -> Result<(ContactDocument, ContactPresence), VerifyError> {
     let mut r = Reader::new(slice);
     let head = r.read_head().map_err(VerifyError::from)?;
     if head.major != MAJOR_MAP {
         return Err(VerifyError::SchemaViolation);
     }
     let mut doc = ContactDocument::default();
+    let mut presence = ContactPresence::default();
     for _ in 0..head.arg {
         let key = r.read_head().map_err(VerifyError::from)?;
         if key.major != MAJOR_UINT {
@@ -584,19 +606,24 @@ pub(crate) fn parse_contact(
             1 => doc.summary = Some(read_tstr(&mut r)?),
             2 => doc.avatar = Some(read_tstr(&mut r)?),
             3 => {
+                presence.also_known_as = true;
                 let len = read_array_len(&mut r)?;
                 for _ in 0..len {
                     doc.also_known_as.push(read_tstr(&mut r)?);
                 }
             }
             4 => {
+                presence.services = true;
                 let len = read_array_len(&mut r)?;
                 for _ in 0..len {
                     doc.services.push(parse_service(&mut r)?);
                 }
             }
             5 => doc.migration = Some(parse_migration(&mut r)?),
-            6 => doc.extensions = parse_extension_map(&mut r)?,
+            6 => {
+                presence.extensions = true;
+                doc.extensions = parse_extension_map(&mut r)?;
+            }
             // Unknown core labels are a schema violation: the normative CDDL
             // contact-document map is closed; extensions live under label 6.
             _ => return Err(VerifyError::SchemaViolation),
@@ -606,7 +633,7 @@ pub(crate) fn parse_contact(
         return Err(VerifyError::InvalidCbor);
     }
     doc.validate(Some(containing_did))?;
-    Ok(doc)
+    Ok((doc, presence))
 }
 
 fn read_tstr(r: &mut Reader<'_>) -> Result<String, VerifyError> {

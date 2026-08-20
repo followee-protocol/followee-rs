@@ -880,3 +880,169 @@ fn impl_9_5_conforming_config_requires_https_or_explicit_dev_mode() {
         .is_ok()
     );
 }
+
+#[test]
+fn sec_15_1_exactly_16385_byte_validly_signed_record_is_recorded_cap_isolated() {
+    // Milestone 6 participant evidence. The recorded HTTP publish
+    // request-entity cap of this participant is 65,536 bytes (4 × the
+    // 16 KiB record cap; `MAX_PUBLISH_REQUEST_BYTES`). An exactly
+    // 16,385-byte, validly signed, fault-isolated record stays far below
+    // that cap, so it must reach protocol processing and receive HTTP
+    // `200` with status `2` / `recordTooLarge` — never a transport error.
+    use followee::contact::ExtensionValue;
+    use followee::record::seal_record_body;
+
+    /// Builds a validly signed Alice envelope of exactly `target` bytes by
+    /// padding a record-level extension bytes value. Everything except the
+    /// total size is valid, so size is the single fault.
+    fn sized_envelope(target: usize) -> Vec<u8> {
+        let build = |pad: usize| {
+            let mut body = b4_body();
+            body.extensions.insert(
+                "https://example.com/pad".to_owned(),
+                ExtensionValue::Bytes(vec![0u8; pad]),
+            );
+            seal_record_body(&body.encode().expect("schema-valid body"), &root_seed())
+        };
+        let probe = build(16_000);
+        let pad = 16_000 + target - probe.len();
+        let envelope = build(pad);
+        assert_eq!(envelope.len(), target, "exact envelope size");
+        envelope
+    }
+
+    with_both_backends(|addr| {
+        // Control: the identical construction one byte smaller (exactly at
+        // the 16 KiB cap) is admitted, proving the oversized case is
+        // fault-isolated to size alone.
+        let at_cap = sized_envelope(16 * 1024);
+        let response = publish_record(addr, &at_cap);
+        assert_eq!(response.status, 200);
+        assert_eq!(publish_outcome(&response.body), (0, None), "16,384 admits");
+
+        let over = sized_envelope(16 * 1024 + 1);
+        assert!(
+            over.len() < 65_536,
+            "16,385 bytes is below the recorded 65,536-byte entity cap"
+        );
+        let response = publish_record(addr, &over);
+        assert_eq!(response.status, 200, "protocol processing, not 413");
+        assert_eq!(
+            publish_outcome(&response.body),
+            (2, Some(3)),
+            "status 2 / recordTooLarge"
+        );
+    });
+}
+
+#[test]
+fn sec_12_5_v0_9_2_publish_outcomes_decode_through_the_production_client_over_http() {
+    // End-to-end v0.9.2 loop over real HTTP: the served status `0`, bare
+    // status `1`, and status `2` responses all arrive as HTTP `200` and
+    // decode through the production client's v0.9.2 publish-response path.
+    use followee::clock::ManualClock;
+    use followee::relay::client::{
+        BudgetMeter, HttpTransport, NetworkPolicy, OperationBudget, RelayClient,
+    };
+    with_both_backends(|addr| {
+        let transport = HttpTransport;
+        let clock = ManualClock::new(RELAY_NOW_MS);
+        let client = RelayClient::new(&transport, NetworkPolicy::Development, &clock);
+        let base = format!("http://{addr}/");
+        let mut meter = BudgetMeter::new(OperationBudget {
+            deadline_ms: None,
+            max_response_bytes: 1024 * 1024,
+            max_requests: 16,
+        });
+
+        let admitted = client
+            .publish(&base, &fx_bytes("root_record_envelope"), &mut meter)
+            .expect("admitted");
+        assert_eq!(admitted.value.status, 0);
+        assert_eq!(admitted.value.error_code, None);
+
+        // Duplicate: this relay's deterministic no-code status-1 encoding,
+        // a conforming v0.9.2 form kept visibly distinct from the coded
+        // form (permitted diagnostic variation).
+        let duplicate = client
+            .publish(&base, &fx_bytes("root_record_envelope"), &mut meter)
+            .expect("no-change");
+        assert_eq!(duplicate.value.status, 1);
+        assert_eq!(duplicate.value.error_code, None);
+
+        // A conforming status-2 protocol rejection carried in HTTP 200.
+        let rejected = client
+            .publish(&base, &fx_bytes("b8_envelope"), &mut meter)
+            .expect("rejection is successful HTTP-layer processing");
+        assert_eq!(rejected.value.status, 2);
+        assert_eq!(
+            rejected.value.error_code,
+            Some(7),
+            "identityBindingMismatch"
+        );
+    });
+}
+
+#[test]
+fn sec_12_7_naturally_obtained_foreign_and_corrupted_cursors_over_http() {
+    // Milestone 6 participant evidence with no forged or seeded cursors:
+    // every cursor presented below was actually issued by a relay.
+    use followee::store::{MemoryStore, RelayIdentity};
+
+    // Relay A and relay B are independent instances with distinct cursor
+    // generations, as any two real relays are.
+    let a = memory_relay();
+    let b = relay_over(Box::new(MemoryStore::new(RelayIdentity {
+        relay_id: [0xBB; 16],
+        cursor_generation: [0xC1; 16],
+        directory_generation: b11_generation(),
+    })));
+    let addr_a = start_server(&a);
+    let addr_b = start_server(&b);
+    assert_eq!(
+        publish_record(addr_a, &fx_bytes("root_record_envelope")).status,
+        200
+    );
+
+    // Obtain a genuine cursor from A over HTTP.
+    let response = post_cbor(addr_a, "/v1/changes", &changes_request(None, 10, 1 << 20));
+    let issued = decode_value(&response.body)
+        .get(3)
+        .expect("nextCursor")
+        .as_bytes()
+        .to_vec();
+
+    // A's genuine cursor presented to B is a naturally obtained
+    // foreign-generation cursor: the exact two-field ResetRequired.
+    let response = post_cbor(
+        addr_b,
+        "/v1/changes",
+        &changes_request(Some(&issued), 10, 1 << 20),
+    );
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, vec![0xa2, 0x00, 0x01, 0x01, 0x01]);
+
+    // After A resets its own cursor generation (restore behaviour,
+    // section 12.7), A's earlier issued cursor also requires reset at A.
+    a.relay
+        .with_store(|s| s.reset_cursor_generation([0x9A; 16]))
+        .expect("reset");
+    let response = post_cbor(
+        addr_a,
+        "/v1/changes",
+        &changes_request(Some(&issued), 10, 1 << 20),
+    );
+    assert_eq!(response.body, vec![0xa2, 0x00, 0x01, 0x01, 0x01]);
+
+    // A truncated corruption of the genuinely issued cursor is malformed:
+    // status 2 with invalidCursor, never ResetRequired.
+    let corrupted = &issued[..issued.len() - 1];
+    let response = post_cbor(
+        addr_a,
+        "/v1/changes",
+        &changes_request(Some(corrupted), 10, 1 << 20),
+    );
+    let value = decode_value(&response.body);
+    assert_eq!(value.get(1).expect("status").as_uint(), 2);
+    assert_eq!(value.get(6).expect("code").as_uint(), 18, "invalidCursor");
+}

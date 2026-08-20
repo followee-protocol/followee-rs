@@ -78,3 +78,10 @@ path = "fuzz_targets/webfinger_resource_parse.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "interop_line"
+path = "fuzz_targets/interop_line.rs"
+test = false
+doc = false
+bench = false

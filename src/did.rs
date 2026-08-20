@@ -32,7 +32,9 @@ pub enum DidError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FolloweeDid {
     text: String,
-    digest: [u8; 32],
+    /// The exact validated 34-byte multihash the method-specific identifier
+    /// decodes to: `0x12 || 0x20 || digest` (specification section 3.1).
+    multihash: [u8; 34],
 }
 
 impl FolloweeDid {
@@ -74,12 +76,14 @@ impl FolloweeDid {
         if code != MULTIHASH_SHA2_256 || length != DIGEST_LENGTH {
             return Err(DidError::UnsupportedHash);
         }
-        let digest: [u8; 32] = digest.try_into().map_err(|_| DidError::InvalidDid)?;
+        // The validated decode is exactly the 34-byte v1 multihash; retain
+        // those exact bytes (IMPLEMENTATION.md section 11.8 finding I1).
+        let multihash: [u8; 34] = bytes.try_into().map_err(|_| DidError::InvalidDid)?;
 
         // base58btc is a bijection, so the retained text is canonical.
         Ok(FolloweeDid {
             text: s.to_owned(),
-            digest,
+            multihash,
         })
     }
 
@@ -88,12 +92,12 @@ impl FolloweeDid {
     #[must_use]
     pub fn from_descriptor_bytes(descriptor: &[u8]) -> Self {
         let digest = crypto::sha256_domain(crypto::DESCRIPTOR_HASH_PREFIX, descriptor);
-        let mut multihash = Vec::with_capacity(34);
-        multihash.push(0x12);
-        multihash.push(0x20);
-        multihash.extend_from_slice(&digest);
+        let mut multihash = [0u8; 34];
+        multihash[0] = 0x12;
+        multihash[1] = 0x20;
+        multihash[2..].copy_from_slice(&digest);
         let text = format!("{DID_PREFIX}z{}", bs58::encode(multihash).into_string());
-        FolloweeDid { text, digest }
+        FolloweeDid { text, multihash }
     }
 
     /// The canonical textual form.
@@ -105,7 +109,24 @@ impl FolloweeDid {
     /// The committed 32-byte descriptor digest.
     #[must_use]
     pub fn digest(&self) -> &[u8; 32] {
-        &self.digest
+        self.multihash[2..]
+            .try_into()
+            .expect("a validated v1 multihash carries exactly 32 digest bytes")
+    }
+
+    /// The exact already-validated 34-byte DID multihash:
+    /// `0x12 || 0x20 || digest` (specification sections 3.1 and 4.3).
+    ///
+    /// This is the narrow production accessor required by the Campaign 1
+    /// finding I1 (IMPLEMENTATION.md section 11.8): interoperability
+    /// adapters take these bytes from the validated value rather than
+    /// re-parsing the DID or reconstructing the multihash themselves. The
+    /// bytes are retained from strict parsing, or assembled once during
+    /// derivation, and are identical for both construction paths of one
+    /// canonical DID.
+    #[must_use]
+    pub fn multihash_bytes(&self) -> &[u8; 34] {
+        &self.multihash
     }
 }
 
@@ -227,6 +248,27 @@ mod tests {
         let did = FolloweeDid::from_descriptor_bytes(b"example descriptor bytes");
         let reparsed = FolloweeDid::parse(did.as_str()).expect("derived DID parses");
         assert_eq!(did, reparsed);
+    }
+
+    #[test]
+    fn sec_4_3_multihash_accessor_returns_the_exact_validated_bytes() {
+        // Appendix B.3 publishes Alice's exact multihash bytes; the I1
+        // accessor must return them unchanged from strict parsing.
+        let did = FolloweeDid::parse(ALICE).expect("parses");
+        assert_eq!(
+            hex_upper(did.multihash_bytes()),
+            "122012DC4B843D10C5CA7313AA2452DB61D661AFBE3943B3FDBEA43405C7028D1EB2"
+        );
+        assert_eq!(did.multihash_bytes()[0], 0x12, "sha2-256 code");
+        assert_eq!(did.multihash_bytes()[1], 0x20, "32-byte digest length");
+        assert_eq!(&did.multihash_bytes()[2..], did.digest().as_slice());
+    }
+
+    #[test]
+    fn sec_4_3_multihash_bytes_agree_between_parsing_and_derivation() {
+        let derived = FolloweeDid::from_descriptor_bytes(b"example descriptor bytes");
+        let parsed = FolloweeDid::parse(derived.as_str()).expect("parses");
+        assert_eq!(derived.multihash_bytes(), parsed.multihash_bytes());
     }
 
     #[test]

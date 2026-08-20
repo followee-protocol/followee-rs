@@ -1,0 +1,8 @@
+{"interfaceProtocol":"1","caseId":"b8-descriptor-substitution","status":"rejected","error":"identityBindingMismatch"}
+{"interfaceProtocol":"1","caseId":"b10-duplicate-key","status":"rejected","error":"invalidCbor"}
+{"interfaceProtocol":"1","caseId":"b10-utf8-overlong","status":"rejected","error":"invalidCbor"}
+{"interfaceProtocol":"1","caseId":"b10-utf8-surrogate","status":"rejected","error":"invalidCbor"}
+{"interfaceProtocol":"1","caseId":"b10-utf8-above-max","status":"rejected","error":"invalidCbor"}
+{"interfaceProtocol":"1","caseId":"b10-utf8-incomplete","status":"rejected","error":"invalidCbor"}
+{"interfaceProtocol":"1","caseId":"b12-simple-value-16","status":"rejected","error":"schemaViolation"}
+{"interfaceProtocol":"1","caseId":"b12-simple-value-32","status":"rejected","error":"schemaViolation"}

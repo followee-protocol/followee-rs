@@ -1,0 +1,11 @@
+{"interfaceProtocol":"1","caseId":"challenge-select-trio-perm-00","status":"accepted","result":{"winnerRecordBodyDigestHex":"44011539e6a3e5f855b19fe781a2236cc3cd2f6c77b586d6a438963fa553d068","authorityState":"root"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-trio-perm-01","status":"accepted","result":{"winnerRecordBodyDigestHex":"44011539e6a3e5f855b19fe781a2236cc3cd2f6c77b586d6a438963fa553d068","authorityState":"root"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-trio-perm-02","status":"accepted","result":{"winnerRecordBodyDigestHex":"44011539e6a3e5f855b19fe781a2236cc3cd2f6c77b586d6a438963fa553d068","authorityState":"root"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-trio-perm-03","status":"accepted","result":{"winnerRecordBodyDigestHex":"44011539e6a3e5f855b19fe781a2236cc3cd2f6c77b586d6a438963fa553d068","authorityState":"root"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-trio-perm-04","status":"accepted","result":{"winnerRecordBodyDigestHex":"44011539e6a3e5f855b19fe781a2236cc3cd2f6c77b586d6a438963fa553d068","authorityState":"root"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-trio-perm-05","status":"accepted","result":{"winnerRecordBodyDigestHex":"44011539e6a3e5f855b19fe781a2236cc3cd2f6c77b586d6a438963fa553d068","authorityState":"root"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-authority-perm-00","status":"accepted","result":{"winnerRecordBodyDigestHex":"457406325201e808689e891778193f78600d9ceb2820bd5b927da597802ffeb0","authorityState":"rootRevoked"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-authority-perm-01","status":"accepted","result":{"winnerRecordBodyDigestHex":"457406325201e808689e891778193f78600d9ceb2820bd5b927da597802ffeb0","authorityState":"rootRevoked"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-dave-perm-00","status":"accepted","result":{"winnerRecordBodyDigestHex":"bfdba84df905bea92288e88c853536c828bd5099dbbdf88968d78774c3b2ccc2","authorityState":"root"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-dave-perm-01","status":"accepted","result":{"winnerRecordBodyDigestHex":"bfdba84df905bea92288e88c853536c828bd5099dbbdf88968d78774c3b2ccc2","authorityState":"root"}}
+{"interfaceProtocol":"1","caseId":"challenge-select-carol-sticky","status":"accepted","result":{"winnerRecordBodyDigestHex":null,"authorityState":"rootRevoked"}}

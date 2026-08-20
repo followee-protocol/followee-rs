@@ -509,3 +509,66 @@ fn sec_12_7_generation_reset_permits_bounded_reenumeration() {
     let rescan = changes_value(&t, None, 10, 1 << 20);
     assert_eq!(rescan.get(2).expect("entries").as_array().len(), 2);
 }
+
+#[test]
+fn sec_13_3_retained_premature_tuple_stays_in_changes_and_out_of_resolve() {
+    // Participant-owned Milestone 6 regression evidence: a retained current
+    // tuple that has become premature under the relay's present clock (1)
+    // still appears in the changes feed as the ordinary current Full tuple,
+    // (2) is filtered from resolve as the per-DID Error(premature), and (3)
+    // is neither deleted nor mutated merely because it is presently
+    // premature (sections 5.4, 12.3, 12.6, 13.3).
+    let t = memory_relay();
+    assert_eq!(publish(&t, &fx_bytes("root_record_envelope")).0, 0);
+    let counter = last_update(&t);
+
+    // Backwards clock correction: the stored record is now premature.
+    t.clock.set(B4_TIMESTAMP_MS - MAX_FUTURE_SKEW_MS - 1);
+
+    // (1) Changes still carries the exact current tuple. Synchronization
+    // exchanges current state; the receiver's section 13.3 ingress makes
+    // the local premature decision, so serving-side filtering here would
+    // silently starve peers instead.
+    let changes = changes_value(&t, None, 10, 1 << 20);
+    assert_eq!(changes.get(1).expect("status").as_uint(), 0, "success");
+    let entries = changes.get(2).expect("entries").as_array().to_vec();
+    assert_eq!(entries.len(), 1, "the premature tuple is listed");
+    let entry = entries[0].as_array();
+    assert_eq!(entry[0], TestValue::Text(fx_str("followee_did")));
+    assert_eq!(entry[1].get(0).expect("payload kind").as_uint(), 0, "Full");
+    assert_eq!(
+        entry[1].get(1).expect("payload").as_bytes(),
+        fx_bytes("root_record_envelope").as_slice(),
+        "the exact retained envelope bytes"
+    );
+    assert_eq!(entry[2].as_uint(), counter, "the retained lastUpdated");
+
+    // (2) Resolve filters it as Error(premature), never Absent or Full.
+    let results = resolve_results(&t, &[&fx_str("followee_did")]);
+    assert_eq!(results[0].get(0).expect("kind").as_uint(), 3, "Error");
+    assert_eq!(results[0].get(2).expect("code").as_uint(), 10, "premature");
+
+    // (3) Nothing about the stored entry changed.
+    let entry = t
+        .relay
+        .with_store(|s| s.entry(&fx_str("followee_did")))
+        .expect("store readable")
+        .expect("entry retained, not deleted");
+    assert_eq!(entry.last_updated, counter, "lastUpdated unchanged");
+    match &entry.payload {
+        EntryPayload::Full(bytes) => {
+            assert_eq!(
+                bytes.as_slice(),
+                fx_bytes("root_record_envelope").as_slice(),
+                "envelope bytes unchanged"
+            );
+        }
+        other => panic!("payload mutated: {other:?}"),
+    }
+    assert_eq!(last_update(&t), counter, "no update number assigned");
+
+    // Once admissible again, the same tuple serves as Full.
+    t.clock.set(RELAY_NOW_MS);
+    let results = resolve_results(&t, &[&fx_str("followee_did")]);
+    assert_eq!(results[0].get(0).expect("kind").as_uint(), 0, "Full again");
+}

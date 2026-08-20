@@ -1031,3 +1031,214 @@ fn sec_15_2_request_cursor_exactly_at_the_cap_is_sent() {
         .expect("a 128-byte cursor is within the section 15.2 cap");
     assert_eq!(transport.requests().len(), 1, "the request was sent");
 }
+
+// ---------------------------------------------------------------------------
+// Specification v0.9.2: publish-response status-dependent field rules
+// through the production client decoding path (section 12.5).
+// ---------------------------------------------------------------------------
+
+/// Builds `{0: 1, 1: status, ? 2: code}` deterministically.
+fn publish_body(status: u64, code: Option<u64>) -> Vec<u8> {
+    let mut entries = vec![(r_uint(0), r_uint(1)), (r_uint(1), r_uint(status))];
+    if let Some(code) = code {
+        entries.push((r_uint(2), r_uint(code)));
+    }
+    r_map(&entries)
+}
+
+/// Runs one publish through the production client against the given
+/// response body.
+fn publish_with_body(body: Vec<u8>) -> Result<(u64, Option<u64>), ClientError> {
+    let transport = MockTransport::new();
+    let clock = ManualClock::new(RELAY_NOW_MS);
+    let client = dev_client(&transport, &clock);
+    transport.on("http://127.0.0.1:9001/v1/publish", cbor_ok(body));
+    let mut m = meter();
+    client
+        .publish(BASE, &fx_bytes("root_record_envelope"), &mut m)
+        .map(|outcome| (outcome.value.status, outcome.value.error_code))
+}
+
+#[test]
+fn sec_12_5_client_accepts_every_conforming_publish_response() {
+    assert_eq!(
+        publish_with_body(publish_body(0, None)).expect("status 0"),
+        (0, None)
+    );
+    // Both observed Campaign 1 status-1 encodings conform and stay
+    // visibly distinct: the bare form and each permitted diagnostic.
+    assert_eq!(
+        publish_with_body(publish_body(1, None)).expect("bare 1"),
+        (1, None)
+    );
+    assert_eq!(
+        publish_with_body(publish_body(1, Some(12))).expect("losingRecord"),
+        (1, Some(12))
+    );
+    assert_eq!(
+        publish_with_body(publish_body(1, Some(13))).expect("duplicate"),
+        (1, Some(13))
+    );
+    for code in (0..=19u64).filter(|c| *c != 12 && *c != 13) {
+        assert_eq!(
+            publish_with_body(publish_body(2, Some(code))).expect("status 2"),
+            (2, Some(code)),
+            "status 2 code {code}"
+        );
+    }
+}
+
+#[test]
+fn sec_12_5_client_rejects_every_invalid_publish_combination_completely() {
+    let mut invalid: Vec<Vec<u8>> = Vec::new();
+    // Status 0 with any code.
+    for code in [0u64, 12, 13, 19] {
+        invalid.push(publish_body(0, Some(code)));
+    }
+    // Status 1 with every registered code outside the two no-change
+    // reasons — including invalidSignature (9) and rateLimited (15).
+    for code in (0..=19u64).filter(|c| *c != 12 && *c != 13) {
+        invalid.push(publish_body(1, Some(code)));
+    }
+    // Status 2 without a code, or with a no-change reason.
+    invalid.push(publish_body(2, None));
+    invalid.push(publish_body(2, Some(12)));
+    invalid.push(publish_body(2, Some(13)));
+    // Unregistered codes on every status.
+    for status in [0u64, 1, 2] {
+        for code in [20u64, 255, u64::MAX] {
+            invalid.push(publish_body(status, Some(code)));
+        }
+    }
+    for body in invalid {
+        let hex_body = hex::encode(&body);
+        assert_eq!(
+            publish_with_body(body).expect_err("must reject"),
+            ClientError::OuterResponse(VerifyError::SchemaViolation),
+            "no status may be extracted from {hex_body}"
+        );
+    }
+}
+
+#[test]
+fn sec_12_5_client_keeps_deeper_cbor_classifications_for_publish() {
+    // Truncated response: invalidCbor, not schemaViolation.
+    assert_eq!(
+        publish_with_body(vec![0xA2, 0x00, 0x01, 0x01]).expect_err("truncated"),
+        ClientError::OuterResponse(VerifyError::InvalidCbor)
+    );
+    // Non-minimal status encoding: nonDeterministicCbor.
+    assert_eq!(
+        publish_with_body(hex::decode("a20001011800").expect("hex")).expect_err("non-minimal"),
+        ClientError::OuterResponse(VerifyError::NonDeterministicCbor)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Mandatory hostile-response tests (Milestone 6): non-conforming peer
+// metadata is rejected completely with no usable partial state.
+// ---------------------------------------------------------------------------
+
+/// An info body whose version and suite arrays are caller-chosen.
+fn info_with_arrays(versions: &[Vec<u8>], suites: &[Vec<u8>]) -> Vec<u8> {
+    let limits = r_map(&[
+        (r_uint(0), r_uint(16 * 1024)),
+        (r_uint(1), r_uint(256)),
+        (r_uint(2), r_uint(1024 * 1024)),
+        (r_uint(3), r_uint(1024)),
+        (r_uint(4), r_uint(4 * 1024 * 1024)),
+    ]);
+    r_map(&[
+        (r_uint(0), r_uint(1)),
+        (r_uint(1), r_bstr(&[0xAA; 16])),
+        (r_uint(2), r_uint(0x01 | 0x02 | 0x04)),
+        (r_uint(3), r_array(versions)),
+        (r_uint(4), r_array(suites)),
+        (r_uint(5), limits),
+        (r_uint(6), r_bstr(&[0xC0; 16])),
+        (r_uint(7), r_bstr(&b11_generation())),
+        (r_uint(8), r_tstr("http://127.0.0.1/")),
+    ])
+}
+
+fn info_with_body(body: Vec<u8>) -> Result<followee::relay::client::RelayInfo, ClientError> {
+    let transport = MockTransport::new();
+    let clock = ManualClock::new(RELAY_NOW_MS);
+    let client = dev_client(&transport, &clock);
+    transport.on("http://127.0.0.1:9001/v1/info", cbor_ok(body));
+    let mut m = meter();
+    client.info(BASE, &mut m).map(|outcome| outcome.value)
+}
+
+#[test]
+fn sec_12_2_info_missing_protocol_version_1_is_rejected_completely() {
+    // A hostile peer advertising only version 2 fails as a complete
+    // schemaViolation rejection: the client returns no RelayInfo value at
+    // all, so no partial peer metadata can leak into later decisions.
+    let body = info_with_arrays(&[r_uint(2)], &[r_nint_mag(18)]);
+    assert_eq!(
+        info_with_body(body).expect_err("must reject"),
+        ClientError::OuterResponse(VerifyError::SchemaViolation)
+    );
+    // Control: version 1 alongside others is conforming (section 12.2 MAY
+    // advertise later versions).
+    let body = info_with_arrays(&[r_uint(1), r_uint(2)], &[r_nint_mag(18)]);
+    let info = info_with_body(body).expect("conforming");
+    assert_eq!(info.protocol_versions, vec![1, 2]);
+}
+
+#[test]
+fn sec_12_2_info_missing_suite_minus_19_is_rejected_completely() {
+    // Only the deprecated polymorphic -8: complete rejection.
+    let body = info_with_arrays(&[r_uint(1)], &[r_nint_mag(7)]);
+    assert_eq!(
+        info_with_body(body).expect_err("must reject"),
+        ClientError::OuterResponse(VerifyError::SchemaViolation)
+    );
+    // Control: -19 alongside another suite is conforming.
+    let body = info_with_arrays(&[r_uint(1)], &[r_nint_mag(18), r_nint_mag(7)]);
+    let info = info_with_body(body).expect("conforming");
+    assert_eq!(info.suites, vec![-19, -8]);
+}
+
+#[test]
+fn sec_11_4_directory_with_duplicate_indices_is_rejected_completely() {
+    let transport = MockTransport::new();
+    let clock = ManualClock::new(RELAY_NOW_MS);
+    let client = dev_client(&transport, &clock);
+    // Two entries assigning index 4 to different endpoints: ambiguous Ref
+    // resolution; the strict client rejects the complete response and
+    // exposes neither row.
+    transport.on(
+        "http://127.0.0.1:9001/v1/directory",
+        cbor_ok(directory_response_with(
+            &b11_generation(),
+            &[
+                (4, [0x01; 16], "https://relay-a.example/"),
+                (4, [0x02; 16], "https://relay-b.example/"),
+            ],
+        )),
+    );
+    let mut m = meter();
+    assert_eq!(
+        client.directory(BASE, &mut m).expect_err("must reject"),
+        ClientError::OuterResponse(VerifyError::SchemaViolation)
+    );
+
+    // Control: distinct indices are accepted with both rows visible.
+    let transport = MockTransport::new();
+    let client = dev_client(&transport, &clock);
+    transport.on(
+        "http://127.0.0.1:9001/v1/directory",
+        cbor_ok(directory_response_with(
+            &b11_generation(),
+            &[
+                (4, [0x01; 16], "https://relay-a.example/"),
+                (5, [0x02; 16], "https://relay-b.example/"),
+            ],
+        )),
+    );
+    let mut m = meter();
+    let directory = client.directory(BASE, &mut m).expect("conforming");
+    assert_eq!(directory.value.entries.len(), 2);
+}
